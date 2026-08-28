@@ -24,3 +24,9 @@ variable "github_repo" {
   description = "Repository name without the owner. Only this repo can impersonate the CI account."
   type        = string
 }
+
+variable "pool_suffix" {
+  description = "Suffix for the Workload Identity pool id — set when a same-named pool is still soft-deleted"
+  type        = string
+  default     = ""
+}

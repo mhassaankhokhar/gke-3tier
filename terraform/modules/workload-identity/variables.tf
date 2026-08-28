@@ -17,3 +17,13 @@ variable "ci_service_account_id" {
   description = "Fully qualified id of the account CI impersonates (the iam module's ci_service_account_id output), not its email"
   type        = string
 }
+
+variable "pool_suffix" {
+  description = <<-EOT
+    Appended to the pool and provider ids. Leave empty normally. Set it when a
+    previous pool of the same name is still soft-deleted (30 days, id reserved) —
+    GCP refuses to recreate it and `undelete` is the only alternative.
+  EOT
+  type        = string
+  default     = ""
+}

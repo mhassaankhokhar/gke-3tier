@@ -9,8 +9,16 @@
 # workstation with user ADC (`gcloud auth application-default login`), put the
 # outputs into the repo's Actions variables, and every later apply runs in CI.
 
+locals {
+  # Suffix exists only to sidestep a soft-deleted predecessor. Deleting a pool
+  # reserves its id for 30 days, so rebuilding from scratch inside that window
+  # needs either `undelete` or a new id — this makes the second option a one-line
+  # change instead of renaming the whole project.
+  pool_id = var.pool_suffix == "" ? "${var.name}-github" : "${var.name}-github-${var.pool_suffix}"
+}
+
 resource "google_iam_workload_identity_pool" "github" {
-  workload_identity_pool_id = "${var.name}-github"
+  workload_identity_pool_id = local.pool_id
   display_name              = "${var.name} GitHub"
   description               = "Federates GitHub Actions OIDC tokens to GCP service accounts"
 
@@ -24,7 +32,7 @@ resource "google_iam_workload_identity_pool" "github" {
 
 resource "google_iam_workload_identity_pool_provider" "github" {
   workload_identity_pool_id          = google_iam_workload_identity_pool.github.workload_identity_pool_id
-  workload_identity_pool_provider_id = "${var.name}-github"
+  workload_identity_pool_provider_id = local.pool_id
   display_name                       = "GitHub Actions"
 
   oidc {

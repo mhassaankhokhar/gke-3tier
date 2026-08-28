@@ -29,4 +29,8 @@ module "workload_identity" {
 
   # The fully qualified id, not the email.
   ci_service_account_id = module.iam.ci_service_account_id
+
+  # Non-empty because the original gke-3tier-github pool is soft-deleted until
+  # late September 2026. Drop it back to "" once that lapses, if the id matters.
+  pool_suffix = var.pool_suffix
 }
