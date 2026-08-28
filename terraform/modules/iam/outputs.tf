@@ -17,3 +17,8 @@ output "backup_service_account_email" {
   description = "Account CloudNativePG uses for GCS backups; the storage module grants it object access on the bucket"
   value       = google_service_account.backup.email
 }
+
+output "backup_service_account_id" {
+  description = "Fully qualified id of the backup account — the env binds the CloudNativePG KSA to it once the cluster (and therefore the Workload Identity pool) exists"
+  value       = google_service_account.backup.name
+}

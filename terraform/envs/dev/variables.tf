@@ -47,3 +47,15 @@ variable "authorized_networks" {
     display_name = "all (narrow this)"
   }]
 }
+
+variable "backup_namespace" {
+  description = "Namespace the CloudNativePG cluster runs in — half of the Workload Identity binding"
+  type        = string
+  default     = "database"
+}
+
+variable "backup_ksa_name" {
+  description = "Kubernetes service account the CloudNativePG cluster uses. Must match the manifests exactly; a mismatch fails at backup time, not at apply time."
+  type        = string
+  default     = "postgres-backup"
+}

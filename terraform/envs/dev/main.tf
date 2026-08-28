@@ -64,3 +64,17 @@ module "artifact_registry" {
   node_service_account = module.iam.node_service_account_email
   ci_service_account   = module.iam.ci_service_account_email
 }
+
+# Binds the CloudNativePG Kubernetes service account to the GCP backup account,
+# so the operator writes to GCS without a mounted key.
+#
+# It sits here rather than in the iam module because it references
+# PROJECT.svc.id.goog — the Workload Identity pool that only exists once a
+# cluster with workload_identity_config does. Placing it next to module.gke makes
+# that ordering a dependency rather than a footnote, and keeps module.iam
+# applicable on its own during bootstrap.
+resource "google_service_account_iam_member" "postgres_backup" {
+  service_account_id = module.iam.backup_service_account_id
+  role               = "roles/iam.workloadIdentityUser"
+  member             = "serviceAccount:${module.gke.workload_identity_pool}[${var.backup_namespace}/${var.backup_ksa_name}]"
+}

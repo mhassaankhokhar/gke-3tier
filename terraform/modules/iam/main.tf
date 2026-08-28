@@ -75,10 +75,10 @@ resource "google_service_account" "backup" {
   description  = "Bound to the CloudNativePG Kubernetes service account via Workload Identity"
 }
 
-# Object-level access on the backup bucket only; granted by the storage module
-# so this account holds no project-wide storage permission.
-resource "google_service_account_iam_member" "backup_workload_identity" {
-  service_account_id = google_service_account.backup.name
-  role               = "roles/iam.workloadIdentityUser"
-  member             = "serviceAccount:${var.project_id}.svc.id.goog[${var.backup_namespace}/${var.backup_ksa_name}]"
-}
+# NOTE: the Kubernetes-service-account binding for this account is deliberately
+# NOT here. It references the cluster's Workload Identity pool
+# (PROJECT.svc.id.goog), which does not exist until a GKE cluster with
+# workload_identity_config has been created — and this module is applied during
+# bootstrap, before any cluster. The binding lives in the env alongside the gke
+# module so ordering falls out of the dependency graph instead of being a rule
+# someone has to remember.
