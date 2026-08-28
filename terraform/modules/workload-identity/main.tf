@@ -14,9 +14,12 @@ resource "google_iam_workload_identity_pool" "github" {
   display_name              = "${var.name} GitHub"
   description               = "Federates GitHub Actions OIDC tokens to GCP service accounts"
 
-  # NOTE: deleting a pool soft-deletes it for 30 days and the id stays reserved.
-  # A destroy/re-apply cycle inside that window fails with "already exists" —
-  # change the id or undelete rather than fighting it.
+  # Deleting this pool soft-deletes it for 30 days with the id reserved, so a
+  # rebuild inside that window fails with "already exists" and needs an
+  # `undelete`. Refuse the destroy rather than discover that later.
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 resource "google_iam_workload_identity_pool_provider" "github" {

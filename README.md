@@ -47,12 +47,14 @@ credit is gone.
 
 ```
 terraform/
+  bootstrap/             identity only — applied once, by hand, own state
+  infra/                 network, cluster, registry — applied by CI, own state
   modules/
     network/             VPC, private subnets, Cloud NAT
     gke/                 cluster + spot node pool, Workload Identity enabled
     artifact-registry/   container images
-    workload-identity/   GitHub OIDC → GCP, and KSA → GSA bindings
-  envs/dev/              the only environment; small on purpose
+    iam/                 scoped service accounts
+    workload-identity/   GitHub OIDC → GCP
 k8s/
   base/
     web/  api/           the application
@@ -69,8 +71,10 @@ docs/                    decisions worth writing down
 Built to outlive the trial credit rather than depend on it:
 
 - **Spot node pool** — preemptible nodes cost a fraction of on-demand.
-- **Everything in Terraform** — `terraform destroy` when idle, re-apply to
-  rebuild. Nothing is click-configured and therefore unrecoverable.
+- **Everything in Terraform** — `terraform destroy` in `infra/` when idle,
+  re-apply to rebuild. Nothing is click-configured and therefore unrecoverable.
+  The pipeline's own identity lives in `bootstrap/` with a separate state, so
+  that destroy cannot take the credentials needed to rebuild.
 - **No managed data services** — database and storage are portable, so the whole
   stack can move to k3d or any other Kubernetes when the credit ends.
 

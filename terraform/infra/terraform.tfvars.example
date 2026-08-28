@@ -1,0 +1,5 @@
+project_id   = "<your-gcp-project-id>"
+region       = "us-central1"
+zone         = "us-central1-a"
+name         = "gke-3tier"
+state_bucket = "<your-tfstate-bucket>"

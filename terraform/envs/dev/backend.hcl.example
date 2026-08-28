@@ -1,4 +1,0 @@
-# Copy to backend.hcl and fill in, then:
-#   terraform init -backend-config=backend.hcl
-bucket = "<your-tfstate-bucket>"
-prefix = "gke-3tier/dev"

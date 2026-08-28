@@ -52,6 +52,13 @@ resource "google_service_account" "ci" {
   account_id   = "${var.name}-ci"
   display_name = "${var.name} CI pipeline"
   description  = "Impersonated by GitHub Actions via Workload Identity Federation; has no keys"
+
+  # Second line of defence behind state separation: even a destroy run in the
+  # wrong directory is refused at plan time. This account is what lets CI
+  # authenticate at all — losing it means redoing the whole bootstrap.
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
 # container.developer manages workloads inside the cluster but cannot create,

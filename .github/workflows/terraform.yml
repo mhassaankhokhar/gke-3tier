@@ -1,7 +1,11 @@
 name: Terraform
 
-# Infrastructure delivery. Everything past the one-time bootstrap in
-# docs/bootstrap.md is applied from here — nothing is created by hand.
+# Infrastructure delivery for terraform/infra — nothing here is created by hand.
+#
+# terraform/bootstrap is deliberately NOT applied by this workflow. It holds the
+# service accounts and OIDC provider this job authenticates with, in a separate
+# state; keeping it out means a destroy of infra cannot remove the pipeline's own
+# credentials. See docs/bootstrap.md.
 #
 #   pull request -> plan, posted as a comment
 #   push to main -> apply, behind the `production` environment gate
@@ -27,8 +31,10 @@ env:
   # Values live in repository variables, not in the repo: the project id and the
   # state bucket name identify a real account.
   TF_VAR_project_id: ${{ vars.GCP_PROJECT_ID }}
-  TF_VAR_github_owner: ${{ github.repository_owner }}
-  TF_VAR_github_repo: ${{ github.event.repository.name }}
+  # infra/ reads the identity from bootstrap's state rather than creating it, so
+  # it needs to know where that state lives. github_owner/repo are not passed:
+  # the OIDC provider they configure belongs to bootstrap, which CI never runs.
+  TF_VAR_state_bucket: ${{ vars.TF_BACKEND_BUCKET }}
 
 jobs:
   plan:
@@ -49,15 +55,15 @@ jobs:
       # Partial backend, same as locally — the bucket is supplied here rather
       # than committed.
       - name: Init
-        working-directory: terraform/envs/dev
+        working-directory: terraform/infra
         run: |
           terraform init \
             -backend-config="bucket=${{ vars.TF_BACKEND_BUCKET }}" \
-            -backend-config="prefix=gke-3tier/dev"
+            -backend-config="prefix=gke-3tier/infra"
 
       - name: Plan
         id: plan
-        working-directory: terraform/envs/dev
+        working-directory: terraform/infra
         run: terraform plan -out=tfplan -input=false -no-color
 
       # The plan pins exactly what apply will do, so apply cannot drift from what
@@ -66,11 +72,11 @@ jobs:
       - uses: actions/upload-artifact@v7
         with:
           name: tfplan
-          path: terraform/envs/dev/tfplan
+          path: terraform/infra/tfplan
           retention-days: 1
 
       - name: Plan summary
-        working-directory: terraform/envs/dev
+        working-directory: terraform/infra
         run: |
           {
             echo '## Terraform plan'
@@ -104,15 +110,15 @@ jobs:
       - uses: actions/download-artifact@v8
         with:
           name: tfplan
-          path: terraform/envs/dev
+          path: terraform/infra
 
       - name: Init
-        working-directory: terraform/envs/dev
+        working-directory: terraform/infra
         run: |
           terraform init \
             -backend-config="bucket=${{ vars.TF_BACKEND_BUCKET }}" \
-            -backend-config="prefix=gke-3tier/dev"
+            -backend-config="prefix=gke-3tier/infra"
 
       - name: Apply
-        working-directory: terraform/envs/dev
+        working-directory: terraform/infra
         run: terraform apply -input=false tfplan

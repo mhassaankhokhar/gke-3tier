@@ -4,7 +4,7 @@ variable "project_id" {
 }
 
 variable "region" {
-  description = "Region for the network, registry and state bucket. Keep all three together — split across regions costs egress and latency for nothing."
+  description = "Region for the network and registry. Same region as the state bucket and cluster — splitting them costs egress and latency for nothing."
   type        = string
   default     = "us-central1"
 }
@@ -12,9 +12,9 @@ variable "region" {
 variable "zone" {
   description = <<-EOT
     Zone for the cluster. Zonal rather than regional: a regional control plane
-    replicates across zones and multiplies node count, which is right for
-    production and roughly triples the burn rate for a project meant to outlive a
-    trial credit. Must sit inside var.region.
+    replicates across zones and multiplies node count — right for production,
+    roughly triple the burn for a project meant to outlive a trial credit. A zone
+    outage takes the cluster down; accepted, and recorded in docs/.
   EOT
   type        = string
   default     = "us-central1-a"
@@ -26,14 +26,16 @@ variable "name" {
   default     = "gke-3tier"
 }
 
-variable "github_owner" {
-  description = "GitHub account that owns the repository — the OIDC provider's attribute_condition pins to this"
+# ── Reading bootstrap's state ────────────────────────────────────────────────
+variable "state_bucket" {
+  description = "Bucket holding both states. Passed in rather than committed, same as the backend config."
   type        = string
 }
 
-variable "github_repo" {
-  description = "Repository name without the owner. Only this repo can impersonate the CI account."
+variable "bootstrap_state_prefix" {
+  description = "Prefix of the bootstrap state within that bucket — the identity outputs are read from here, never written"
   type        = string
+  default     = "gke-3tier/bootstrap"
 }
 
 variable "authorized_networks" {
@@ -48,6 +50,7 @@ variable "authorized_networks" {
   }]
 }
 
+# ── CloudNativePG identity ───────────────────────────────────────────────────
 variable "backup_namespace" {
   description = "Namespace the CloudNativePG cluster runs in — half of the Workload Identity binding"
   type        = string

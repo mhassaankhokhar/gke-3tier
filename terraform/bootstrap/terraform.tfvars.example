@@ -1,0 +1,5 @@
+project_id   = "<your-gcp-project-id>"
+region       = "us-central1"
+name         = "gke-3tier"
+github_owner = "<your-github-username-or-org>"
+github_repo  = "<repository-name>"
