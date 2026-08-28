@@ -44,12 +44,17 @@ gcloud services enable \
   artifactregistry.googleapis.com \
   iam.googleapis.com \
   iamcredentials.googleapis.com \
-  sts.googleapis.com
+  sts.googleapis.com \
+  cloudresourcemanager.googleapis.com
 ```
 
-`iamcredentials` and `sts` are the ones people forget; federation fails at token
-exchange without them, which reads as a permissions problem rather than a missing
-API.
+Three of these fail in ways that do not look like a missing API:
+
+- `iamcredentials` and `sts` — federation fails at token exchange, which reads as
+  a permissions problem.
+- `cloudresourcemanager` — Terraform cannot read the project IAM policy, so every
+  `google_project_iam_member` in state errors with 403 IAM_PERMISSION_DENIED even
+  though the permissions are correct.
 
 **3. Apply just the identity targets:**
 
@@ -62,7 +67,29 @@ terraform apply -target=module.iam -target=module.workload_identity
 `-target` is normally a smell. It is correct here: the rest of the stack should
 be created by the pipeline, and applying it now would defeat the point.
 
-**4. Configure GitHub.** Take the outputs and set them as repository *variables*
+**4. Grant the CI account what the pipeline needs.** The pipeline applies the
+infrastructure, so it needs infrastructure permissions — but deliberately not the
+ability to change its own:
+
+```bash
+PROJ=<PROJECT_ID>
+SA="serviceAccount:<name>-ci@$PROJ.iam.gserviceaccount.com"
+for r in roles/viewer roles/compute.networkAdmin roles/container.admin \
+         roles/artifactregistry.admin roles/iam.serviceAccountUser; do
+  gcloud projects add-iam-policy-binding "$PROJ" --member="$SA" --role="$r" --condition=None
+done
+
+# State bucket — created by hand, so it carries no IAM from Terraform
+gcloud storage buckets add-iam-policy-binding gs://<STATE_BUCKET> \
+  --member="$SA" --role="roles/storage.objectAdmin"
+```
+
+Withheld on purpose: `iam.serviceAccountAdmin` and `resourcemanager.projectIamAdmin`.
+Without them the pipeline can build the whole stack but cannot create service
+accounts or grant itself project roles — so a compromised workflow cannot widen
+its own access. The cost is that IAM changes stay a bootstrap task.
+
+**5. Configure GitHub.** Take the outputs and set them as repository *variables*
 (Settings → Secrets and variables → Actions → Variables):
 
 | Variable | Value |
@@ -74,7 +101,7 @@ Variables, not secrets: neither value is a credential. The provider name only
 names a trust relationship, and it is useless without an OIDC token from the one
 repository the binding permits.
 
-**5. Hand state to the pipeline.** State lives in a GCS bucket (see
+**6. Hand state to the pipeline.** State lives in a GCS bucket (see
 `envs/dev/versions.tf`) so the local bootstrap and every later CI run share it.
 A local-only state file would leave the pipeline unable to see what exists.
 
