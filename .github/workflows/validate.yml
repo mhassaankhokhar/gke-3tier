@@ -41,11 +41,12 @@ jobs:
 
       # -backend=false: validate needs providers, not remote state. A real init
       # would demand the bucket, which is deliberately not in this repo.
-      # Both configurations, not just infra: bootstrap is applied rarely and by
-      # hand, which is exactly when a broken config is most expensive to find.
-      - name: Validate bootstrap and infra
+      # Bootstrap as well as the environments: it is applied rarely and by hand,
+      # which is exactly when a broken config is most expensive to find. The
+      # envs/*/ glob picks up new environments without editing this workflow.
+      - name: Validate bootstrap and environments
         run: |
-          for dir in terraform/bootstrap terraform/infra; do
+          for dir in terraform/bootstrap terraform/envs/*/; do
             echo "==> $dir"
             terraform -chdir="$dir" init -backend=false -input=false >/dev/null
             terraform -chdir="$dir" validate

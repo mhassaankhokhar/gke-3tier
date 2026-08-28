@@ -48,7 +48,9 @@ credit is gone.
 ```
 terraform/
   bootstrap/             identity only — applied once, by hand, own state
-  infra/                 network, cluster, registry — applied by CI, own state
+  envs/dev/              network, cluster, registry — applied by CI, own state
+                         one directory per environment, each with its own state;
+                         not CLI workspaces, which share a backend and credentials
   modules/
     network/             VPC, private subnets, Cloud NAT
     gke/                 cluster + spot node pool, Workload Identity enabled
@@ -71,7 +73,7 @@ docs/                    decisions worth writing down
 Built to outlive the trial credit rather than depend on it:
 
 - **Spot node pool** — preemptible nodes cost a fraction of on-demand.
-- **Everything in Terraform** — `terraform destroy` in `infra/` when idle,
+- **Everything in Terraform** — `terraform destroy` in `envs/dev/` when idle,
   re-apply to rebuild. Nothing is click-configured and therefore unrecoverable.
   The pipeline's own identity lives in `bootstrap/` with a separate state, so
   that destroy cannot take the credentials needed to rebuild.

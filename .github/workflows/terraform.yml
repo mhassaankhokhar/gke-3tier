@@ -1,6 +1,6 @@
 name: Terraform
 
-# Infrastructure delivery for terraform/infra — nothing here is created by hand.
+# Infrastructure delivery for terraform/envs/dev — nothing here is created by hand.
 #
 # terraform/bootstrap is deliberately NOT applied by this workflow. It holds the
 # service accounts and OIDC provider this job authenticates with, in a separate
@@ -55,15 +55,15 @@ jobs:
       # Partial backend, same as locally — the bucket is supplied here rather
       # than committed.
       - name: Init
-        working-directory: terraform/infra
+        working-directory: terraform/envs/dev
         run: |
           terraform init \
             -backend-config="bucket=${{ vars.TF_BACKEND_BUCKET }}" \
-            -backend-config="prefix=gke-3tier/infra"
+            -backend-config="prefix=gke-3tier/envs/dev"
 
       - name: Plan
         id: plan
-        working-directory: terraform/infra
+        working-directory: terraform/envs/dev
         run: terraform plan -out=tfplan -input=false -no-color
 
       # The plan pins exactly what apply will do, so apply cannot drift from what
@@ -72,11 +72,11 @@ jobs:
       - uses: actions/upload-artifact@v7
         with:
           name: tfplan
-          path: terraform/infra/tfplan
+          path: terraform/envs/dev/tfplan
           retention-days: 1
 
       - name: Plan summary
-        working-directory: terraform/infra
+        working-directory: terraform/envs/dev
         run: |
           {
             echo '## Terraform plan'
@@ -110,15 +110,15 @@ jobs:
       - uses: actions/download-artifact@v8
         with:
           name: tfplan
-          path: terraform/infra
+          path: terraform/envs/dev
 
       - name: Init
-        working-directory: terraform/infra
+        working-directory: terraform/envs/dev
         run: |
           terraform init \
             -backend-config="bucket=${{ vars.TF_BACKEND_BUCKET }}" \
-            -backend-config="prefix=gke-3tier/infra"
+            -backend-config="prefix=gke-3tier/envs/dev"
 
       - name: Apply
-        working-directory: terraform/infra
+        working-directory: terraform/envs/dev
         run: terraform apply -input=false tfplan

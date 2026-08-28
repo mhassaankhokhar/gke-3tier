@@ -12,8 +12,8 @@ override.tf.json
 terraform.rc
 
 # Never commit real values — envs/*/terraform.tfvars is per-developer
-terraform/*/terraform.tfvars
-!terraform/*/terraform.tfvars.example
+terraform/**/terraform.tfvars
+!terraform/**/terraform.tfvars.example
 
 # GCP credentials — Workload Identity Federation means these should never exist,
 # but an accidental `gcloud iam service-accounts keys create` lands here.
@@ -37,5 +37,5 @@ kubeconfig
 .DS_Store
 
 # Backend config names a real bucket — keep it out of git like tfvars
-terraform/*/backend.hcl
-!terraform/*/backend.hcl.example
+terraform/**/backend.hcl
+!terraform/**/backend.hcl.example

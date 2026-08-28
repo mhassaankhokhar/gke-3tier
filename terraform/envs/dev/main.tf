@@ -1,4 +1,10 @@
-# Infrastructure — applied by CI, never by hand.
+# dev environment — applied by CI, never by hand.
+#
+# One directory per environment, each with its own state and its own backend
+# config. Not Terraform CLI workspaces: those keep every environment's state in
+# one backend behind one set of credentials, so an apply in the wrong workspace
+# reaches production. HashiCorp's own guidance points them at temporary parallel
+# copies (a per-PR stack), not at environment separation.
 #
 # Identity lives in bootstrap/ with its own state. This configuration READS those
 # accounts and never creates them, so `terraform destroy` here removes the
@@ -19,14 +25,14 @@ locals {
 }
 
 module "network" {
-  source = "../modules/network"
+  source = "../../modules/network"
 
   name   = var.name
   region = var.region
 }
 
 module "gke" {
-  source = "../modules/gke"
+  source = "../../modules/gke"
 
   project_id = var.project_id
   name       = var.name
@@ -45,7 +51,7 @@ module "gke" {
 }
 
 module "artifact_registry" {
-  source = "../modules/artifact-registry"
+  source = "../../modules/artifact-registry"
 
   name   = var.name
   region = var.region

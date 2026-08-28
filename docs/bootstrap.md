@@ -65,7 +65,7 @@ terraform apply
 ```
 
 No `-target`. `bootstrap/` contains only the identity, in its own state — that
-separation is what makes a later `terraform destroy` in `infra/` unable to reach
+separation is what makes a later `terraform destroy` in an environment unable to reach
 it. An earlier version of this repo kept everything in one state and used
 `-target` to apply "just the bootstrap"; a plain destroy then took the service
 accounts and the Workload Identity pool with the cluster, and the pool stayed
@@ -110,15 +110,15 @@ repository the binding permits.
 | Config | Prefix | Applied by |
 |---|---|---|
 | `terraform/bootstrap` | `gke-3tier/bootstrap` | a human, once |
-| `terraform/infra` | `gke-3tier/infra` | CI, every merge |
+| `terraform/envs/dev` | `gke-3tier/envs/dev` | CI, every merge |
 
-`infra/` reads the identity from bootstrap's state through
+Each environment reads the identity from bootstrap's state through
 `terraform_remote_state` — it consumes those accounts and never manages them.
 
 ## Destroying
 
 ```bash
-cd terraform/infra && terraform destroy
+cd terraform/envs/dev && terraform destroy
 ```
 
 Removes the cluster, network and registry. It cannot touch the service accounts,
