@@ -35,3 +35,7 @@ kubeconfig
 
 # macOS
 .DS_Store
+
+# Backend config names a real bucket — keep it out of git like tfvars
+terraform/envs/**/backend.hcl
+!terraform/envs/**/backend.hcl.example
