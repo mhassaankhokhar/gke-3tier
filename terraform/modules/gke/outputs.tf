@@ -20,13 +20,13 @@ output "workload_identity_pool" {
   value       = "${var.project_id}.svc.id.goog"
 }
 
-# Surfaced so the Kubernetes manifests do not have to hardcode the toleration
-# key/value that the stateful pool's taint uses.
-output "stateful_taint" {
-  description = "Taint applied to the stateful pool; Postgres and Longhorn must tolerate it"
+# Surfaced so manifests pin themselves by label rather than repeating the string.
+# Neither pool is tainted — see main.tf for why — so placement is entirely a
+# nodeSelector decision made by each workload.
+output "node_labels" {
+  description = "workload label values: pin Postgres and Longhorn to stateful, prefer stateless for web/api"
   value = {
-    key    = "workload"
-    value  = "stateful"
-    effect = "NoSchedule"
+    stateful  = "stateful"
+    stateless = "stateless"
   }
 }

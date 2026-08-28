@@ -4,11 +4,23 @@
 # VMs are reclaimed on ~30 seconds notice; a CloudNativePG primary or a Longhorn
 # replica living on one means constant failover and volume rebuilds. So:
 #
-#   stateful pool — on-demand, tainted, runs Postgres and Longhorn
-#   spot pool     — preemptible, untainted, runs web/api
+#   stateful pool — on-demand, runs Postgres and Longhorn
+#   spot pool     — preemptible, runs web/api
 #
 # Stateless replicas absorb preemption fine, and they are the bulk of the
 # compute, so most of the cost saving survives the split.
+#
+# Placement is by LABEL, not by taint. The stateful pool was tainted
+# NoSchedule at first, and that pushed every GKE system pod — kube-dns,
+# metrics-server, konnectivity — onto the spot nodes, because none of them
+# tolerate a custom taint. Two consequences, both bad: cluster DNS ended up on
+# preemptible hardware, and the spot pool needed a second node purely for system
+# overhead before any application was deployed.
+#
+# So neither pool is tainted. Workloads that must land somewhere specific say so
+# themselves via nodeSelector on the workload label — which also puts the
+# scheduling decision in the manifest, where it is visible, instead of in a node
+# pool property nobody reads.
 
 resource "google_container_cluster" "main" {
   name     = var.name
@@ -75,7 +87,7 @@ resource "google_container_cluster" "main" {
   deletion_protection = false
 }
 
-# ── Stateful pool: on-demand, tainted ────────────────────────────────────────
+# ── Stateful pool: on-demand, labelled workload=stateful ─────────────────────
 resource "google_container_node_pool" "stateful" {
   name     = "${var.name}-stateful"
   cluster  = google_container_cluster.main.id
@@ -92,14 +104,6 @@ resource "google_container_node_pool" "stateful" {
     # autoscaled down underneath it — node_count is fixed for that reason.
     labels = {
       workload = "stateful"
-    }
-
-    # Only pods that explicitly tolerate this run here, which keeps web/api off
-    # the expensive nodes rather than relying on scheduler luck.
-    taint {
-      key    = "workload"
-      value  = "stateful"
-      effect = "NO_SCHEDULE"
     }
 
     service_account = var.node_service_account
@@ -121,7 +125,7 @@ resource "google_container_node_pool" "stateful" {
   }
 }
 
-# ── Stateless pool: spot, autoscaled ─────────────────────────────────────────
+# ── Stateless pool: spot, autoscaled, labelled workload=stateless ────────────
 resource "google_container_node_pool" "spot" {
   name     = "${var.name}-spot"
   cluster  = google_container_cluster.main.id
