@@ -1,1 +1,6 @@
-# envs/dev — terraform.tfvars.example
+# Copy to terraform.tfvars and fill in. terraform.tfvars is gitignored:
+# the project id identifies a real GCP account and does not belong in a repo
+# that may become public.
+project_id = "<your-gcp-project-id>"
+region     = "asia-south1"
+name       = "gke-3tier"
