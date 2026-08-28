@@ -1,24 +1,47 @@
-# GKE MLOps Platform
+# GKE 3-Tier Platform
 
-A GitOps-managed platform on Google Kubernetes Engine: the 3-tier Node.js app
-from [aws-3tier](https://github.com/mhassaankhokhar/aws-3tier) redeployed on GCP,
-alongside an MLflow tracking server and a small LLM inference service — with
-Istio service mesh, autoscaling, and Kubernetes RBAC.
+The 3-tier Node.js app from [aws-3tier](https://github.com/mhassaankhokhar/aws-3tier)
+rebuilt on Google Kubernetes Engine — same application, a Kubernetes-native data
+and storage layer instead of managed AWS services.
 
 ```
-Internet -> Istio Ingress Gateway -> VirtualService
-                                       |-- web  (Node/Express)
-                                       |-- api  (Node/Express) -> Cloud SQL
-                                       |-- mlflow (tracking + registry) -> GCS
-                                       `-- llm  (inference) -> model from GCS
+Internet -> Ingress -> web (Node/Express)
+                    -> api (Node/Express) -> PostgreSQL (CloudNativePG)
+                          |
+                          `-> shared uploads (Longhorn RWX)
 ```
 
 ## Why this exists
 
-The same workload runs on AWS in `aws-3tier`. This repo is the GCP half: the
-portable pieces (containers, Kubernetes manifests, GitOps) stay the same, and
-everything cloud-specific lives behind a Terraform module boundary. Running one
-architecture on two clouds is the point — it shows what actually transfers.
+`aws-3tier` runs this application on ECS Fargate with RDS. This repo runs the
+same application on Kubernetes with the database and shared storage inside the
+cluster. Running one architecture two ways is the point — it shows which parts
+are portable and which were really cloud-vendor features.
+
+| | aws-3tier | gke-3tier |
+|---|---|---|
+| Compute | ECS Fargate | GKE (spot node pool) |
+| Database | RDS PostgreSQL (managed) | CloudNativePG (in-cluster) |
+| Shared storage | — | Longhorn (RWX) |
+| Registry | ECR | Artifact Registry |
+| CI/CD auth | GitHub OIDC → IAM role | GitHub OIDC → Workload Identity Federation |
+
+## Storage, and why it is split
+
+GKE's default `pd-balanced` StorageClass is **ReadWriteOnce** — a volume attaches
+to one node at a time. Two replicas scheduled onto different nodes leave the
+second stuck in `FailedAttachVolume`. A multi-node cluster needs a plan for this,
+and the plan is not one-size-fits-all:
+
+- **PostgreSQL — ReadWriteOnce, one volume per instance.** CloudNativePG
+  replicates at the database layer. Postgres on shared NFS-backed storage invites
+  locking and fsync problems; it is the wrong tool for the job.
+- **Shared user content — ReadWriteMany, via Longhorn.** Uploads have to be
+  visible to every web/api replica, and that is what RWX actually exists for.
+
+Longhorn rather than Filestore (GCP's managed NFS), on purpose: it runs on any
+cluster, so these manifests still work on a local k3d cluster once the trial
+credit is gone.
 
 ## Layout
 
@@ -28,30 +51,32 @@ terraform/
     network/             VPC, private subnets, Cloud NAT
     gke/                 cluster + spot node pool, Workload Identity enabled
     artifact-registry/   container images
-    storage/             GCS bucket for MLflow artifacts
-    workload-identity/   GitHub OIDC -> GCP, and KSA -> GSA bindings
+    workload-identity/   GitHub OIDC → GCP, and KSA → GSA bindings
   envs/dev/              the only environment; small on purpose
 k8s/
-  base/{api,web,mlflow,llm}   deployments, services, HPA, RBAC
-  overlays/dev/               kustomize overlay
+  base/
+    web/  api/           the application
+    postgres/            CloudNativePG cluster
+    longhorn/            RWX StorageClass
+  overlays/dev/
 argocd/                  app-of-apps definitions
 .github/workflows/       CI (no credentials) + CD (OIDC, no stored keys)
-docs/                    architecture notes and decisions
+docs/                    decisions worth writing down
 ```
 
 ## Cost posture
 
-Built to survive the free trial expiring, not to depend on it:
+Built to outlive the trial credit rather than depend on it:
 
-- **Spot node pool** — preemptible nodes are a fraction of on-demand.
+- **Spot node pool** — preemptible nodes cost a fraction of on-demand.
 - **Everything in Terraform** — `terraform destroy` when idle, re-apply to
-  rebuild. Nothing here is click-configured and therefore unrecoverable.
-- **Components split into separate ArgoCD apps** — the LLM service (the heaviest
-  piece) can be switched off without touching the rest.
+  rebuild. Nothing is click-configured and therefore unrecoverable.
+- **No managed data services** — database and storage are portable, so the whole
+  stack can move to k3d or any other Kubernetes when the credit ends.
 
 ## Status
 
-Scaffolding. Nothing is deployed yet — see `docs/` as decisions get recorded.
+Scaffolding. Nothing is provisioned yet.
 
 ## License
 
