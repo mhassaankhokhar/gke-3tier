@@ -1,0 +1,37 @@
+# Terraform
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+*.tfplan
+planfile
+crash.log
+override.tf
+override.tf.json
+*_override.tf
+.terraformrc
+terraform.rc
+
+# Never commit real values — envs/*/terraform.tfvars is per-developer
+terraform/envs/**/terraform.tfvars
+!terraform/envs/**/terraform.tfvars.example
+
+# GCP credentials — Workload Identity Federation means these should never exist,
+# but an accidental `gcloud iam service-accounts keys create` lands here.
+*-key.json
+*-credentials.json
+sa-*.json
+gcp-*.json
+
+# Node
+node_modules/
+npm-debug.log*
+.env
+.env.*
+
+# Kubernetes / local
+kubeconfig
+*.kubeconfig
+.k3d/
+
+# macOS
+.DS_Store
