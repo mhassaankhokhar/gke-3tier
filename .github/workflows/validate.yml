@@ -1,0 +1,97 @@
+name: Validate
+
+# Credential-free by design: formatting, config validity, a static security scan
+# and the app builds all run without touching GCP. This is the workflow a fork or
+# a visitor can actually run — terraform.yml needs the federated identity and can
+# only ever succeed on the owner's repository.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  terraform:
+    name: Terraform fmt & validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: 1.13.3
+
+      - name: Format check
+        run: terraform fmt -check -recursive terraform/
+
+      # Every module is validated on its own as well as through the env: a module
+      # can be broken in a way the env never instantiates, and that only surfaces
+      # the day someone reuses it.
+      - name: Validate modules
+        run: |
+          for dir in terraform/modules/*/; do
+            echo "==> $dir"
+            terraform -chdir="$dir" init -backend=false -input=false >/dev/null
+            terraform -chdir="$dir" validate
+          done
+
+      # -backend=false: validate needs providers, not remote state. A real init
+      # would demand the bucket, which is deliberately not in this repo.
+      - name: Validate dev environment
+        run: |
+          terraform -chdir=terraform/envs/dev init -backend=false -input=false >/dev/null
+          terraform -chdir=terraform/envs/dev validate
+
+  tfsec:
+    name: Terraform static analysis
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # Report-only. This is a reference architecture with deliberate trade-offs
+      # (a zonal cluster, an open control-plane CIDR) that a generic ruleset
+      # flags as HIGH — failing the build on someone else's severity ranking
+      # would block the repo on decisions already documented in docs/.
+      - name: Trivy config scan
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: config
+          scan-ref: terraform
+          severity: HIGH,CRITICAL
+          exit-code: "0"
+          format: table
+
+  app:
+    name: ${{ matrix.service }} build
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [api, web]
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: ${{ matrix.service }}/package-lock.json
+
+      - name: Install
+        working-directory: ${{ matrix.service }}
+        run: npm ci
+
+      # Neither package.json declares a test script yet, so this asserts the
+      # weaker but still real thing: the entrypoint parses.
+      - name: Smoke check
+        working-directory: ${{ matrix.service }}
+        run: node --check app.js
+
+      # Build only, no registry login — proves the Dockerfile is sound without
+      # needing any GCP credential.
+      - name: Docker build
+        run: docker build -t ${{ matrix.service }}:ci ${{ matrix.service }}/

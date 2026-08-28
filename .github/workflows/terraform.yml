@@ -1,0 +1,118 @@
+name: Terraform
+
+# Infrastructure delivery. Everything past the one-time bootstrap in
+# docs/bootstrap.md is applied from here — nothing is created by hand.
+#
+#   pull request -> plan, posted as a comment
+#   push to main -> apply, behind the `production` environment gate
+on:
+  pull_request:
+    branches: [main]
+    paths: ["terraform/**", ".github/workflows/terraform.yml"]
+  push:
+    branches: [main]
+    paths: ["terraform/**", ".github/workflows/terraform.yml"]
+  workflow_dispatch:
+
+# id-token is what lets GitHub mint the OIDC token federation trades for GCP
+# credentials. Without it auth fails with a misleading "unable to get credentials"
+# rather than a missing-permission error.
+permissions:
+  contents: read
+  id-token: write
+  pull-requests: write
+
+env:
+  TF_VERSION: "1.13.3"
+  # Values live in repository variables, not in the repo: the project id and the
+  # state bucket name identify a real account.
+  TF_VAR_project_id: ${{ vars.GCP_PROJECT_ID }}
+  TF_VAR_github_owner: ${{ github.repository_owner }}
+  TF_VAR_github_repo: ${{ github.event.repository.name }}
+
+jobs:
+  plan:
+    name: Plan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      # Partial backend, same as locally — the bucket is supplied here rather
+      # than committed.
+      - name: Init
+        working-directory: terraform/envs/dev
+        run: |
+          terraform init \
+            -backend-config="bucket=${{ vars.TF_BACKEND_BUCKET }}" \
+            -backend-config="prefix=gke-3tier/dev"
+
+      - name: Plan
+        id: plan
+        working-directory: terraform/envs/dev
+        run: terraform plan -out=tfplan -input=false -no-color
+
+      # The plan pins exactly what apply will do, so apply cannot drift from what
+      # was reviewed. Short retention: a plan carries resource detail and goes
+      # stale within minutes anyway.
+      - uses: actions/upload-artifact@v7
+        with:
+          name: tfplan
+          path: terraform/envs/dev/tfplan
+          retention-days: 1
+
+      - name: Plan summary
+        working-directory: terraform/envs/dev
+        run: |
+          {
+            echo '## Terraform plan'
+            echo '```'
+            terraform show -no-color tfplan
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  apply:
+    name: Apply
+    # Only on main. A PR gets the plan for review; nothing is applied until it
+    # merges.
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    needs: plan
+    runs-on: ubuntu-latest
+    # Add required reviewers to this environment to make the apply wait for an
+    # approval — the recorded equivalent of a manual gate.
+    environment: production
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: tfplan
+          path: terraform/envs/dev
+
+      - name: Init
+        working-directory: terraform/envs/dev
+        run: |
+          terraform init \
+            -backend-config="bucket=${{ vars.TF_BACKEND_BUCKET }}" \
+            -backend-config="prefix=gke-3tier/dev"
+
+      - name: Apply
+        working-directory: terraform/envs/dev
+        run: terraform apply -input=false tfplan
