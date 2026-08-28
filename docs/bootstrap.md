@@ -71,27 +71,15 @@ it. An earlier version of this repo kept everything in one state and used
 accounts and the Workload Identity pool with the cluster, and the pool stayed
 soft-deleted for 30 days with its id reserved.
 
-**4. Grant the CI account what the pipeline needs.** The pipeline applies the
-infrastructure, so it needs infrastructure permissions — but deliberately not the
-ability to change its own:
+**4. CI permissions — no longer a manual step.** The bootstrap apply grants them:
+the five project roles the pipeline needs, `storage.objectAdmin` on the state
+bucket, and `serviceAccountAdmin` on the backup account only.
 
-```bash
-PROJ=<PROJECT_ID>
-SA="serviceAccount:<name>-ci@$PROJ.iam.gserviceaccount.com"
-for r in roles/viewer roles/compute.networkAdmin roles/container.admin \
-         roles/artifactregistry.admin roles/iam.serviceAccountUser; do
-  gcloud projects add-iam-policy-binding "$PROJ" --member="$SA" --role="$r" --condition=None
-done
-
-# State bucket — created by hand, so it carries no IAM from Terraform
-gcloud storage buckets add-iam-policy-binding gs://<STATE_BUCKET> \
-  --member="$SA" --role="roles/storage.objectAdmin"
-```
-
-Withheld on purpose: `iam.serviceAccountAdmin` and `resourcemanager.projectIamAdmin`.
-Without them the pipeline can build the whole stack but cannot create service
-accounts or grant itself project roles — so a compromised workflow cannot widen
-its own access. The cost is that IAM changes stay a bootstrap task.
+Withheld on purpose: `iam.serviceAccountAdmin` and
+`resourcemanager.projectIamAdmin` at the project level. The pipeline can build
+the whole stack but cannot create service accounts or grant itself project roles,
+so a compromised workflow cannot widen its own access. The backup-account grant
+is scoped to that one resource for the same reason.
 
 **5. Configure GitHub.** Take the outputs and set them as repository *variables*
 (Settings → Secrets and variables → Actions → Variables):

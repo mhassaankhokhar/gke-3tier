@@ -16,3 +16,8 @@ variable "name" {
     error_message = "name must be lowercase alphanumeric/hyphen, start with a letter, and stay short enough that name + '-backup' fits GCP's 30-character account_id limit."
   }
 }
+
+variable "state_bucket" {
+  description = "Existing Terraform state bucket. Created out-of-band — the backend must exist before the config that uses it — so this module grants CI access to it rather than creating it."
+  type        = string
+}

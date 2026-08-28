@@ -30,3 +30,8 @@ variable "pool_suffix" {
   type        = string
   default     = ""
 }
+
+variable "state_bucket" {
+  description = "Terraform state bucket, created out-of-band. Bootstrap grants CI access to it."
+  type        = string
+}

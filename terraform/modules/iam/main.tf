@@ -61,15 +61,45 @@ resource "google_service_account" "ci" {
   }
 }
 
-# container.developer manages workloads inside the cluster but cannot create,
-# delete or resize clusters — the pipeline deploys, it does not own the
-# infrastructure. Registry write is granted on the repository, not here.
+# What CI needs to apply the infrastructure — and deliberately no more.
+#
+# Withheld: iam.serviceAccountAdmin and resourcemanager.projectIamAdmin. Without
+# them the pipeline can build the whole stack but cannot create service accounts
+# or grant itself project roles, so a compromised workflow cannot widen its own
+# access. The cost is that IAM changes stay a bootstrap task.
+#
+# viewer is here because `plan` refreshes every resource in state, including the
+# accounts this module creates, and reading those needs project-wide read.
+locals {
+  ci_roles = [
+    "roles/viewer",
+    "roles/compute.networkAdmin",   # VPC, subnets, router, NAT
+    "roles/container.admin",        # cluster and node pools
+    "roles/artifactregistry.admin", # the image repository and its IAM
+    "roles/iam.serviceAccountUser", # attach the node account to the cluster
+  ]
+}
+
 resource "google_project_iam_member" "ci" {
-  for_each = toset(["roles/container.developer"])
+  for_each = toset(local.ci_roles)
 
   project = var.project_id
   role    = each.value
   member  = "serviceAccount:${google_service_account.ci.email}"
+}
+
+# Terraform state lives in a bucket created out-of-band (the backend has to exist
+# before the configuration that uses it), so this grants access to it rather than
+# creating it. Without this, CI's very first `terraform init` fails on
+# storage.objects.list.
+data "google_storage_bucket" "state" {
+  name = var.state_bucket
+}
+
+resource "google_storage_bucket_iam_member" "ci_state" {
+  bucket = data.google_storage_bucket.state.name
+  role   = "roles/storage.objectAdmin"
+  member = "serviceAccount:${google_service_account.ci.email}"
 }
 
 # ── Database backup service account ──────────────────────────────────────────
@@ -80,6 +110,15 @@ resource "google_service_account" "backup" {
   account_id   = "${var.name}-backup"
   display_name = "${var.name} database backups"
   description  = "Bound to the CloudNativePG Kubernetes service account via Workload Identity"
+}
+
+# CI manages the KSA→GSA binding on this one account, so it needs setIamPolicy
+# on it. Granted at the RESOURCE level, not project-wide: CI can change this
+# account's policy and no other, and still cannot create or delete accounts.
+resource "google_service_account_iam_member" "ci_manages_backup" {
+  service_account_id = google_service_account.backup.name
+  role               = "roles/iam.serviceAccountAdmin"
+  member             = "serviceAccount:${google_service_account.ci.email}"
 }
 
 # NOTE: the Kubernetes-service-account binding for this account is deliberately

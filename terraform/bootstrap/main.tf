@@ -16,8 +16,9 @@
 module "iam" {
   source = "../modules/iam"
 
-  project_id = var.project_id
-  name       = var.name
+  project_id   = var.project_id
+  name         = var.name
+  state_bucket = var.state_bucket
 }
 
 module "workload_identity" {
