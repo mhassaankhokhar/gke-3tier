@@ -95,9 +95,15 @@ variable "stateful_disk_size" {
 
 # ── Spot pool ────────────────────────────────────────────────────────────────
 variable "spot_machine_type" {
-  description = "Runs web/api. e2-standard-2 on spot pricing."
+  description = <<-EOT
+    Runs web/api only — two Node/Express services at roughly 250 MB each.
+    e2-medium (1 vCPU / 4 GB) is sized for that; e2-standard-2 was an unexamined
+    default and left most of the node idle. Smaller nodes also make HPA scaling
+    visible instead of theoretical, and keep max scale-out at 4 + 3 = 7 vCPU,
+    inside the 8 vCPU a trial project typically gets per region.
+  EOT
   type        = string
-  default     = "e2-standard-2"
+  default     = "e2-medium"
 }
 
 variable "spot_min_nodes" {
