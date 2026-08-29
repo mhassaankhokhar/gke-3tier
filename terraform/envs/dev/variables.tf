@@ -93,3 +93,9 @@ variable "eso_ksa_name" {
   type        = string
   default     = "external-secrets"
 }
+
+variable "argocd_hostname" {
+  description = "DNS name Argo CD's UI is served on, over the tailnet"
+  type        = string
+  default     = "argo.mhassankhokhar.site"
+}

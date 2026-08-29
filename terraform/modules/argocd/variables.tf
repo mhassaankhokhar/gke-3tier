@@ -41,3 +41,20 @@ variable "apps_path" {
   type        = string
   default     = "argocd/apps"
 }
+
+variable "server_hostname" {
+  description = "DNS name Argo CD's UI is served on, over the tailnet"
+  type        = string
+}
+
+variable "proxy_class" {
+  description = "Tailscale ProxyClass applied to the ingress proxy for the UI"
+  type        = string
+  default     = "stable-pool"
+}
+
+variable "tailnet_hostname" {
+  description = "Machine name Argo CD's proxy takes on the tailnet"
+  type        = string
+  default     = "argocd"
+}
