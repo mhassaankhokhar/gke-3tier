@@ -118,6 +118,23 @@ resource "google_container_node_pool" "stateful" {
     # autoscaled down underneath it — node_count is fixed for that reason.
     labels = {
       workload = "stateful"
+
+      # Which nodes Longhorn may put replica data on.
+      #
+      # longhorn-manager runs on every node, because Longhorn refuses to attach
+      # a volume to a node it has not registered — including an RWX volume,
+      # whose client only mounts NFS. Pinning the manager to this pool made the
+      # spot pool unable to mount anything at all:
+      #
+      #   FailedAttachVolume: node.longhorn.io "gke-...-spot-..." not found
+      #
+      # So placement moves down a level: manager everywhere, disks only here.
+      # With create-default-disk-labeled-nodes enabled, Longhorn creates a
+      # default disk only on nodes carrying this label, and a node with no disk
+      # can mount volumes but can never host a replica. That is the property
+      # the manager's nodeSelector was standing in for, expressed where it
+      # actually belongs.
+      "node.longhorn.io/create-default-disk" = "true"
     }
 
     service_account = var.node_service_account
