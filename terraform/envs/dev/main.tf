@@ -92,10 +92,11 @@ resource "google_service_account_iam_member" "external_secrets" {
 module "cluster_seed" {
   source = "../../modules/cluster-seed"
 
-  project_id       = var.project_id
-  cluster_name     = module.gke.cluster_name
-  cluster_location = var.zone
-  repo_url         = var.repo_url
+  project_id                = var.project_id
+  cluster_name              = module.gke.cluster_name
+  cluster_location          = var.zone
+  repo_url                  = var.repo_url
+  gcp_service_account_email = data.terraform_remote_state.bootstrap.outputs.external_secrets_service_account_email
 
   depends_on = [
     module.gke,

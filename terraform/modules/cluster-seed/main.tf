@@ -37,6 +37,17 @@ resource "helm_release" "external_secrets" {
       # when a secret is first synced, not at install time, which makes it look
       # like a Secret Manager permissions problem.
       name = var.eso_service_account
+
+      # The half of Workload Identity that is easy to miss. The GCP-side binding
+      # (KSA → GSA) is not enough on its own: without this annotation GKE never
+      # maps the pod to the Google account, so it authenticates as the *node's*
+      # service account instead — which has no access to Secret Manager. The
+      # symptom is PermissionDenied on secretmanager.versions.access even though
+      # every binding looks correct, because the identity being denied is not the
+      # one the bindings were written for.
+      annotations = {
+        "iam.gke.io/gcp-service-account" = var.gcp_service_account_email
+      }
     }
 
     # Stable pool: every other component waits on the secrets this produces.

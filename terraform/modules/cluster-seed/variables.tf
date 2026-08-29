@@ -30,6 +30,11 @@ variable "eso_service_account" {
   default     = "external-secrets"
 }
 
+variable "gcp_service_account_email" {
+  description = "GCP service account the ESO pod impersonates. Annotated onto the Kubernetes service account — without it the pod authenticates as the node account regardless of any IAM binding."
+  type        = string
+}
+
 variable "argocd_namespace" {
   description = "Namespace the repo credential Secret must land in — ArgoCD only reads credentials from its own namespace"
   type        = string
