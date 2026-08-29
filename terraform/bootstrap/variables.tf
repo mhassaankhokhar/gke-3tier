@@ -54,5 +54,6 @@ variable "readable_secrets" {
     "tailscale-oauth-client-id",
     "tailscale-oauth-client-secret",
     "postgres-app-password",
+    "web-session-secret",
   ]
 }

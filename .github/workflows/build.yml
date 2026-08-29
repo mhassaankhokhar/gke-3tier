@@ -1,0 +1,117 @@
+# Builds the application images and tells the GitOps repository which one to run.
+#
+# The split this workflow lives on either side of:
+#
+#   this repo      application source, Dockerfiles, and this pipeline
+#   gitops repo    what the cluster runs
+#
+# It builds, pushes, then writes the new tag into the GitOps repository. Argo CD
+# notices the commit and rolls it out; nothing here talks to the cluster, and CI
+# holds no cluster credentials at all.
+#
+# That is also why the two repositories are separate: if the tag bump landed in
+# this repo, every deploy would be a commit that re-triggers this workflow. The
+# usual workaround is `[skip ci]` in the commit message, which is a convention
+# holding back an infinite loop.
+name: Build
+
+on:
+  push:
+    branches: [main]
+    # Only when the applications actually change. A Terraform edit should not
+    # produce a new image, and an unchanged image should not produce a deploy.
+    paths:
+      - "web/**"
+      - "api/**"
+      - ".github/workflows/build.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  # Federation, same as the Terraform workflow: GitHub mints an OIDC token and
+  # GCP trades it for short-lived credentials. No service account key exists.
+  id-token: write
+
+env:
+  REGISTRY: us-central1-docker.pkg.dev
+  # One Artifact Registry repository holding both images as paths. ECR would
+  # need two repositories with two sets of IAM and lifecycle policies; Artifact
+  # Registry treats a repository as a folder.
+  AR_REPO: gke-3tier
+
+jobs:
+  build:
+    name: Build ${{ matrix.app }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        app: [web, api]
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v3
+
+      - name: Authenticate Docker to Artifact Registry
+        run: gcloud auth configure-docker ${{ env.REGISTRY }} --quiet
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: ./${{ matrix.app }}
+          push: true
+          # Tagged with the commit SHA and nothing else — no `latest`.
+          # GitOps has to name an exact image, and a moving tag means the
+          # cluster's contents stop being a function of the repository: two
+          # syncs of the same commit could run different code.
+          tags: ${{ env.REGISTRY }}/${{ vars.GCP_PROJECT_ID }}/${{ env.AR_REPO }}/${{ matrix.app }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    name: Update GitOps
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout the GitOps repository
+        uses: actions/checkout@v7
+        with:
+          repository: mhassaankhokhar/gke-3tier-gitops
+          # A deploy key with write access, separate from the read-only one Argo
+          # CD reads the repository with. Argo CD must never be able to write
+          # what it reconciles, and this pipeline must never be able to read the
+          # cluster — each side holds exactly one direction.
+          ssh-key: ${{ secrets.GITOPS_DEPLOY_KEY }}
+          path: gitops
+
+      - uses: imranismail/setup-kustomize@v2
+
+      - name: Point the overlay at the new images
+        working-directory: gitops/manifests/app/overlays/dev
+        run: |
+          kustomize edit set image \
+            web=${{ env.REGISTRY }}/${{ vars.GCP_PROJECT_ID }}/${{ env.AR_REPO }}/web:${{ github.sha }} \
+            api=${{ env.REGISTRY }}/${{ vars.GCP_PROJECT_ID }}/${{ env.AR_REPO }}/api:${{ github.sha }}
+
+      - name: Commit and push
+        working-directory: gitops
+        run: |
+          git config user.name  "gke-3tier build"
+          git config user.email "build@users.noreply.github.com"
+          git add -A
+          # No-op builds happen: a workflow_dispatch on an unchanged tree, or a
+          # rerun. Committing nothing is correct, and failing on it is not.
+          if git diff --cached --quiet; then
+            echo "images unchanged, nothing to commit"
+            exit 0
+          fi
+          git commit -m "Deploy ${{ github.sha }}
+
+          web and api built from ${{ github.repository }}@${{ github.sha }}."
+          git push
