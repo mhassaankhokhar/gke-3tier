@@ -39,5 +39,19 @@ variable "state_bucket" {
 variable "readable_secrets" {
   description = "Secret Manager secrets External Secrets Operator may read"
   type        = list(string)
-  default     = ["cloudflare-api-token", "argocd-gitops-ssh-key"]
+
+  # Granted per secret, not project-wide: the accessor role on the whole project
+  # would let one compromised operator read every secret the project ever holds.
+  # The cost is that a new secret is inert until it is named here — the symptom
+  # is PermissionDenied on secretmanager.versions.access, from a binding that
+  # looks correct because it is correct, just not for this secret.
+  #
+  # This list lives in bootstrap, which is applied by hand. Adding a secret is
+  # therefore a deliberate step, which is the intent.
+  default = [
+    "cloudflare-api-token",
+    "argocd-gitops-ssh-key",
+    "tailscale-oauth-client-id",
+    "tailscale-oauth-client-secret",
+  ]
 }
