@@ -63,57 +63,68 @@ resource "helm_release" "argocd" {
   timeout       = 600
 }
 
-# The root of the app-of-apps tree: one Application whose job is to point at a
-# directory of other Applications. Adding a component later becomes a file in
+# The root of the app-of-apps tree: one Application whose only job is to point at
+# a directory of other Applications. Adding a component later becomes a file in
 # Git, not a Terraform change.
 #
-# kubernetes_manifest rather than a second helm_release: this is a single custom
-# resource, and wrapping it in a chart would add a layer with nothing in it.
-resource "kubernetes_manifest" "root_app" {
+# Delivered through the argocd-apps chart rather than a kubernetes_manifest
+# resource. kubernetes_manifest validates against the live API *at plan time*, so
+# it fails with "API did not recognize GroupVersionKind (CRD may not be
+# installed)" on any run where ArgoCD's CRDs do not exist yet — which is every
+# first apply, and every plan CI runs against an empty environment. depends_on
+# does not help: plan-time validation happens before anything is applied.
+#
+# Helm only templates at plan time, so this orders correctly against the release
+# above and still works from nothing.
+resource "helm_release" "root_app" {
   depends_on = [helm_release.argocd]
 
-  manifest = {
-    apiVersion = "argoproj.io/v1alpha1"
-    kind       = "Application"
-    metadata = {
-      name      = "root"
-      namespace = var.namespace
-    }
-    spec = {
-      project = "default"
+  name      = "root-app"
+  namespace = var.namespace
 
-      source = {
-        repoURL = var.repo_url
-        # Pinned to a branch here because this is the only environment. A second
-        # environment would point at its own path or revision rather than
-        # sharing one and diverging through parameters.
-        targetRevision = var.target_revision
-        path           = var.apps_path
-        directory = {
-          recurse = true
-        }
-      }
+  repository = "https://argoproj.github.io/argo-helm"
+  chart      = "argocd-apps"
+  version    = var.apps_chart_version
 
-      destination = {
-        server    = "https://kubernetes.default.svc"
+  values = [yamlencode({
+    applications = {
+      root = {
         namespace = var.namespace
-      }
+        project   = "default"
 
-      syncPolicy = {
-        automated = {
-          # Auto-sync on, deliberately: without it a new Application committed to
-          # Git sits unnoticed until someone opens the UI, which defeats the
-          # point of the pattern.
-          prune    = true
-          selfHeal = true
+        source = {
+          repoURL = var.repo_url
+          # Pinned to a branch because this is the only environment. A second one
+          # would track its own path or revision rather than sharing this and
+          # diverging through parameters.
+          targetRevision = var.target_revision
+          path           = var.apps_path
+          directory = {
+            recurse = true
+          }
         }
-        syncOptions = [
-          "CreateNamespace=true",
-          # Server-side apply: several of the charts below (Longhorn, CNPG) ship
-          # CRDs large enough to exceed the client-side annotation limit.
-          "ServerSideApply=true",
-        ]
+
+        destination = {
+          server    = "https://kubernetes.default.svc"
+          namespace = var.namespace
+        }
+
+        syncPolicy = {
+          automated = {
+            # Auto-sync on, deliberately: without prune, deleting a file leaves
+            # the resource running forever; without selfHeal, a manual kubectl
+            # edit silently becomes the real state and Git becomes fiction.
+            prune    = true
+            selfHeal = true
+          }
+          syncOptions = [
+            "CreateNamespace=true",
+            # Several charts below (Longhorn, CNPG) ship CRDs large enough to
+            # exceed the client-side annotation limit.
+            "ServerSideApply=true",
+          ]
+        }
       }
     }
-  }
+  })]
 }

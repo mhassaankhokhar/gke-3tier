@@ -15,6 +15,12 @@ variable "chart_version" {
   default     = "10.4.1"
 }
 
+variable "apps_chart_version" {
+  description = "argocd-apps chart version — pinned for the same reason as the ArgoCD chart itself"
+  type        = string
+  default     = "2.0.5"
+}
+
 variable "repo_url" {
   description = "Git repository ArgoCD reconciles from. Public HTTPS needs no credentials — a private repo would need a repo secret, which is why this project's manifests live in a public path."
   type        = string
