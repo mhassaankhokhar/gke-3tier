@@ -117,7 +117,6 @@ module "argocd" {
 
   repo_url        = var.repo_url
   target_revision = var.target_revision
-  server_hostname = var.argocd_hostname
 
   depends_on = [module.cluster_seed]
 }
