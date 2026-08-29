@@ -62,3 +62,16 @@ variable "backup_ksa_name" {
   type        = string
   default     = "postgres-backup"
 }
+
+# ── GitOps ───────────────────────────────────────────────────────────────────
+variable "repo_url" {
+  description = "Repository ArgoCD reconciles from. Public, so no repo credentials are needed in the cluster."
+  type        = string
+  default     = "https://github.com/mhassaankhokhar/gke-3tier.git"
+}
+
+variable "target_revision" {
+  description = "Branch the root Application tracks"
+  type        = string
+  default     = "main"
+}

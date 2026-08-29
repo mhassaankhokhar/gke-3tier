@@ -15,3 +15,13 @@ output "registry_url" {
 output "network_name" {
   value = module.network.network_name
 }
+
+output "argocd_password_command" {
+  description = "Read the generated ArgoCD admin password (not an output — that would put it in state)"
+  value       = module.argocd.initial_password_command
+}
+
+output "argocd_port_forward" {
+  description = "Reach the ArgoCD UI before an ingress exists"
+  value       = module.argocd.port_forward_command
+}

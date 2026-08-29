@@ -73,3 +73,17 @@ resource "google_service_account_iam_member" "postgres_backup" {
   role               = "roles/iam.workloadIdentityUser"
   member             = "serviceAccount:${module.gke.workload_identity_pool}[${var.backup_namespace}/${var.backup_ksa_name}]"
 }
+
+# ArgoCD — the seed install, and the boundary between the two tools.
+#
+# Terraform stops here: everything else inside the cluster (Longhorn,
+# CloudNativePG, cert-manager, the application) arrives as ArgoCD Applications
+# reconciled from argocd/apps/ in this repository.
+module "argocd" {
+  source = "../../modules/argocd"
+
+  repo_url        = var.repo_url
+  target_revision = var.target_revision
+
+  depends_on = [module.gke]
+}

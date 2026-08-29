@@ -132,3 +132,35 @@ published.
   token in existence — which is why it now refuses to create such a provider.
 - The **binding** narrows further to a single `owner/repo`, so another repository
   in the same account cannot deploy this project.
+
+
+## First apply: the cluster before the providers
+
+`envs/dev` configures the `helm` and `kubernetes` providers from the cluster it
+also creates. Terraform evaluates provider configuration before it knows what an
+apply will produce, so on a completely empty state the first run has nothing to
+read the cluster from.
+
+Target the cluster once, then apply normally:
+
+```bash
+cd terraform/envs/dev
+terraform init -backend-config=backend.hcl
+terraform apply -target=module.gke     # first run on an empty state only
+terraform apply                        # everything, including ArgoCD
+```
+
+This is the one place `-target` is the right tool: it is ordering a single first
+apply, not standing in for a structural boundary the way it was misused for the
+bootstrap. Every later run — and every CI run — is a plain `terraform apply`.
+
+Reading the ArgoCD password afterwards:
+
+```bash
+kubectl -n argocd get secret argocd-initial-admin-secret \
+  -o jsonpath='{.data.password}' | base64 -d
+kubectl -n argocd port-forward svc/argocd-server 8080:80
+```
+
+The password is not a Terraform output on purpose — an output would write it into
+state, and state is shared with CI.

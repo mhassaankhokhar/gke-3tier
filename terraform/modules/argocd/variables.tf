@@ -1,0 +1,33 @@
+variable "namespace" {
+  description = "Namespace ArgoCD runs in"
+  type        = string
+  default     = "argocd"
+}
+
+variable "chart_version" {
+  description = <<-EOT
+    argo-cd chart version — pinned, never a floating range. A GitOps controller
+    reconciles on its own schedule, so an unpinned chart can install something
+    unreviewed with no commit behind it. Bump this file to upgrade; that bump is
+    the review.
+  EOT
+  type        = string
+  default     = "10.4.1"
+}
+
+variable "repo_url" {
+  description = "Git repository ArgoCD reconciles from. Public HTTPS needs no credentials — a private repo would need a repo secret, which is why this project's manifests live in a public path."
+  type        = string
+}
+
+variable "target_revision" {
+  description = "Branch or tag the root Application tracks"
+  type        = string
+  default     = "main"
+}
+
+variable "apps_path" {
+  description = "Directory of Application manifests, relative to the repo root. Everything in it is reconciled recursively."
+  type        = string
+  default     = "argocd/apps"
+}
