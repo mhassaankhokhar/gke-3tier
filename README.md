@@ -43,6 +43,11 @@ Longhorn rather than Filestore (GCP's managed NFS), on purpose: it runs on any
 cluster, so these manifests still work on a local k3d cluster once the trial
 credit is gone.
 
+That portability has a price, and it is worth naming: Longhorn needs `iscsiadm`
+on the host, which GKE's default Container-Optimized OS neither ships nor allows
+installing. The stateful pool therefore runs **Ubuntu** node images while the
+spot pool keeps COS. A managed RWX service would not have imposed that.
+
 ## Layout
 
 ```

@@ -100,6 +100,18 @@ resource "google_container_node_pool" "stateful" {
     disk_size_gb = var.stateful_disk_size
     disk_type    = "pd-balanced"
 
+    # Ubuntu, not the GKE default Container-Optimized OS.
+    #
+    # Longhorn needs iscsiadm (open-iscsi) present on the host. COS does not ship
+    # it and cannot install it — the filesystem is read-only by design — so
+    # longhorn-manager crashloops with "please make sure you have
+    # iscsiadm/open-iscsi installed on the host". Ubuntu images include it.
+    #
+    # This is the node-image cost of choosing Longhorn for portability over a
+    # managed RWX service. Only the stateful pool pays it; the spot pool keeps
+    # COS, which is the smaller and better-hardened image.
+    image_type = var.stateful_image_type
+
     # Longhorn replicates volumes across nodes itself, so the pool must not be
     # autoscaled down underneath it — node_count is fixed for that reason.
     labels = {

@@ -87,6 +87,16 @@ variable "stateful_node_count" {
   default     = 2
 }
 
+variable "stateful_image_type" {
+  description = <<-EOT
+    Node image for the stateful pool. UBUNTU_CONTAINERD because Longhorn requires
+    iscsiadm on the host and Container-Optimized OS neither ships it nor allows
+    installing it. Change this only if the storage layer changes.
+  EOT
+  type        = string
+  default     = "UBUNTU_CONTAINERD"
+}
+
 variable "stateful_disk_size" {
   description = "GB per stateful node — holds Longhorn replica data as well as the OS"
   type        = number
