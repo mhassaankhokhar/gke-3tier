@@ -22,6 +22,7 @@ locals {
   node_sa   = data.terraform_remote_state.bootstrap.outputs.node_service_account_email
   ci_sa     = data.terraform_remote_state.bootstrap.outputs.ci_service_account_email
   backup_sa = data.terraform_remote_state.bootstrap.outputs.backup_service_account_id
+  eso_sa    = data.terraform_remote_state.bootstrap.outputs.external_secrets_service_account_id
 }
 
 module "network" {
@@ -72,6 +73,17 @@ resource "google_service_account_iam_member" "postgres_backup" {
   service_account_id = local.backup_sa
   role               = "roles/iam.workloadIdentityUser"
   member             = "serviceAccount:${module.gke.workload_identity_pool}[${var.backup_namespace}/${var.backup_ksa_name}]"
+}
+
+# Lets External Secrets Operator impersonate its GCP account, so it can read the
+# Cloudflare token from Secret Manager with no key file anywhere.
+#
+# Here rather than in bootstrap for the same reason as the Postgres binding: it
+# references PROJECT.svc.id.goog, which exists only once a cluster does.
+resource "google_service_account_iam_member" "external_secrets" {
+  service_account_id = local.eso_sa
+  role               = "roles/iam.workloadIdentityUser"
+  member             = "serviceAccount:${module.gke.workload_identity_pool}[${var.eso_namespace}/${var.eso_ksa_name}]"
 }
 
 # ArgoCD — the seed install, and the boundary between the two tools.

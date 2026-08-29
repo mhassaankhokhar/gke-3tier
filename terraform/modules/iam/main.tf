@@ -128,3 +128,29 @@ resource "google_service_account_iam_member" "ci_manages_backup" {
 # bootstrap, before any cluster. The binding lives in the env alongside the gke
 # module so ordering falls out of the dependency graph instead of being a rule
 # someone has to remember.
+
+# ── External Secrets service account ─────────────────────────────────────────
+# External Secrets Operator pulls the Cloudflare API token out of Secret Manager
+# and projects it into the cluster as a Kubernetes Secret. Bound to its
+# Kubernetes service account through Workload Identity, so nothing downloads a
+# key and nothing puts the token in Git or in Terraform state.
+resource "google_service_account" "external_secrets" {
+  account_id   = "${var.name}-eso"
+  display_name = "${var.name} External Secrets"
+  description  = "Reads secrets from Secret Manager on behalf of External Secrets Operator"
+}
+
+# accessor, not admin: it can read secret *values* and nothing else — it cannot
+# create, update or delete a secret, or read the project's other resources.
+resource "google_secret_manager_secret_iam_member" "external_secrets" {
+  for_each = toset(var.readable_secrets)
+
+  project   = var.project_id
+  secret_id = each.value
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.external_secrets.email}"
+}
+
+# NOTE: like the backup account, the KSA→GSA binding for this one lives with the
+# cluster (envs/dev), not here — it references PROJECT.svc.id.goog, which only
+# exists once a cluster does.

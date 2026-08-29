@@ -75,3 +75,16 @@ variable "target_revision" {
   type        = string
   default     = "main"
 }
+
+# ── External Secrets identity ────────────────────────────────────────────────
+variable "eso_namespace" {
+  description = "Namespace External Secrets Operator runs in — half of the Workload Identity binding"
+  type        = string
+  default     = "external-secrets"
+}
+
+variable "eso_ksa_name" {
+  description = "ESO's Kubernetes service account. Must match the Helm values exactly; a mismatch fails when a secret is first synced, not at apply time."
+  type        = string
+  default     = "external-secrets"
+}

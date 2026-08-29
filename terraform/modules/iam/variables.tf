@@ -21,3 +21,13 @@ variable "state_bucket" {
   description = "Existing Terraform state bucket. Created out-of-band — the backend must exist before the config that uses it — so this module grants CI access to it rather than creating it."
   type        = string
 }
+
+variable "readable_secrets" {
+  description = <<-EOT
+    Secret Manager secret ids the External Secrets account may read. Granted per
+    secret rather than project-wide, so adding a secret is a deliberate act
+    rather than something the operator silently gains access to.
+  EOT
+  type        = list(string)
+  default     = []
+}

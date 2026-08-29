@@ -19,6 +19,10 @@ module "iam" {
   project_id   = var.project_id
   name         = var.name
   state_bucket = var.state_bucket
+
+  # Read access is granted per secret, so a new secret is a deliberate addition
+  # here rather than something the operator silently picks up.
+  readable_secrets = var.readable_secrets
 }
 
 module "workload_identity" {

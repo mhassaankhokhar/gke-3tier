@@ -35,3 +35,9 @@ variable "state_bucket" {
   description = "Terraform state bucket, created out-of-band. Bootstrap grants CI access to it."
   type        = string
 }
+
+variable "readable_secrets" {
+  description = "Secret Manager secrets External Secrets Operator may read"
+  type        = list(string)
+  default     = ["cloudflare-api-token"]
+}

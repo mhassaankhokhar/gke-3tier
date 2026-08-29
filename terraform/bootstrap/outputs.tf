@@ -28,3 +28,11 @@ output "backup_service_account_email" {
 output "backup_service_account_id" {
   value = module.iam.backup_service_account_id
 }
+
+output "external_secrets_service_account_email" {
+  value = module.iam.external_secrets_service_account_email
+}
+
+output "external_secrets_service_account_id" {
+  value = module.iam.external_secrets_service_account_id
+}

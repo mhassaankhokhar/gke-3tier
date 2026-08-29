@@ -22,3 +22,13 @@ output "backup_service_account_id" {
   description = "Fully qualified id of the backup account — the env binds the CloudNativePG KSA to it once the cluster (and therefore the Workload Identity pool) exists"
   value       = google_service_account.backup.name
 }
+
+output "external_secrets_service_account_email" {
+  description = "Account External Secrets Operator impersonates via Workload Identity"
+  value       = google_service_account.external_secrets.email
+}
+
+output "external_secrets_service_account_id" {
+  description = "Fully qualified id — the env binds the ESO Kubernetes service account to it"
+  value       = google_service_account.external_secrets.name
+}
