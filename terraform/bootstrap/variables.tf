@@ -39,5 +39,5 @@ variable "state_bucket" {
 variable "readable_secrets" {
   description = "Secret Manager secrets External Secrets Operator may read"
   type        = list(string)
-  default     = ["cloudflare-api-token"]
+  default     = ["cloudflare-api-token", "argocd-gitops-ssh-key"]
 }

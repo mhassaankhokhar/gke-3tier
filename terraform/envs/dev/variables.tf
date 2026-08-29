@@ -65,9 +65,14 @@ variable "backup_ksa_name" {
 
 # ── GitOps ───────────────────────────────────────────────────────────────────
 variable "repo_url" {
-  description = "Repository ArgoCD reconciles from. Public, so no repo credentials are needed in the cluster."
+  description = <<-EOT
+    The GitOps repository, kept separate from this one so that CI's image-tag
+    commits cannot re-trigger CI, and so write access to application code does
+    not imply write access to cluster state. Private; ArgoCD reads it with a
+    read-only deploy key.
+  EOT
   type        = string
-  default     = "https://github.com/mhassaankhokhar/gke-3tier.git"
+  default     = "git@github.com:mhassaankhokhar/gke-3tier-gitops.git"
 }
 
 variable "target_revision" {

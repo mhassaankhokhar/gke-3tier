@@ -1,0 +1,5 @@
+apiVersion: v2
+name: cluster-seed
+description: The two objects ArgoCD needs before it can read the GitOps repository
+type: application
+version: 0.1.0

@@ -86,16 +86,36 @@ resource "google_service_account_iam_member" "external_secrets" {
   member             = "serviceAccount:${module.gke.workload_identity_pool}[${var.eso_namespace}/${var.eso_ksa_name}]"
 }
 
-# ArgoCD — the seed install, and the boundary between the two tools.
+# The seed: External Secrets, the ClusterSecretStore, and the deploy key ArgoCD
+# reads the GitOps repository with. These cannot come from Git, because each is
+# required to read Git.
+module "cluster_seed" {
+  source = "../../modules/cluster-seed"
+
+  project_id       = var.project_id
+  cluster_name     = module.gke.cluster_name
+  cluster_location = var.zone
+  repo_url         = var.repo_url
+
+  depends_on = [
+    module.gke,
+    # The Workload Identity binding must exist before ESO tries to impersonate,
+    # or the first secret sync fails with a permissions error.
+    google_service_account_iam_member.external_secrets,
+  ]
+}
+
+# ArgoCD — installed after the seed, so the repo credential is already present
+# when its root Application first tries to clone.
 #
-# Terraform stops here: everything else inside the cluster (Longhorn,
-# CloudNativePG, cert-manager, the application) arrives as ArgoCD Applications
-# reconciled from argocd/apps/ in this repository.
+# Terraform stops here: everything else inside the cluster (cert-manager,
+# external-dns, Longhorn, CloudNativePG, the application) arrives as ArgoCD
+# Applications reconciled from the separate gke-3tier-gitops repository.
 module "argocd" {
   source = "../../modules/argocd"
 
   repo_url        = var.repo_url
   target_revision = var.target_revision
 
-  depends_on = [module.gke]
+  depends_on = [module.cluster_seed]
 }

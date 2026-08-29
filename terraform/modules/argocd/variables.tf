@@ -22,7 +22,11 @@ variable "apps_chart_version" {
 }
 
 variable "repo_url" {
-  description = "Git repository ArgoCD reconciles from. Public HTTPS needs no credentials — a private repo would need a repo secret, which is why this project's manifests live in a public path."
+  description = <<-EOT
+    Git repository ArgoCD reconciles from — the separate GitOps repo, not this
+    one. SSH URL because it is private: ArgoCD authenticates with a read-only
+    deploy key that External Secrets projects from Secret Manager.
+  EOT
   type        = string
 }
 

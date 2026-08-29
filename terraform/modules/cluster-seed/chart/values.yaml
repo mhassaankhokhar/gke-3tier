@@ -1,0 +1,11 @@
+# Every value is supplied by the Terraform module; these exist so `helm lint` and
+# `helm template` work standalone, and so the expected keys are discoverable.
+projectId: ""
+clusterName: ""
+clusterLocation: ""
+secretStoreName: gcp-secret-manager
+esoNamespace: external-secrets
+esoServiceAccount: external-secrets
+argocdNamespace: argocd
+repoUrl: ""
+sshKeySecretName: argocd-gitops-ssh-key
