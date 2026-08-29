@@ -112,14 +112,14 @@ resource "google_service_account" "backup" {
   description  = "Bound to the CloudNativePG Kubernetes service account via Workload Identity"
 }
 
-# CI manages the KSA→GSA binding on this one account, so it needs setIamPolicy
-# on it. Granted at the RESOURCE level, not project-wide: CI can change this
-# account's policy and no other, and still cannot create or delete accounts.
-resource "google_service_account_iam_member" "ci_manages_backup" {
-  service_account_id = google_service_account.backup.name
-  role               = "roles/iam.serviceAccountAdmin"
-  member             = "serviceAccount:${google_service_account.ci.email}"
-}
+# CI manages the KSA→GSA bindings on these accounts, so it needs setIamPolicy on
+# each. Granted at the RESOURCE level, not project-wide: CI can change these two
+# accounts' policies and no others, and still cannot create or delete accounts or
+# grant itself project roles.
+#
+# One entry per account rather than a project-level grant — adding a third
+# workload identity should be a deliberate line here, not something CI silently
+# gains the ability to do.
 
 # NOTE: the Kubernetes-service-account binding for this account is deliberately
 # NOT here. It references the cluster's Workload Identity pool
@@ -154,3 +154,14 @@ resource "google_secret_manager_secret_iam_member" "external_secrets" {
 # NOTE: like the backup account, the KSA→GSA binding for this one lives with the
 # cluster (envs/dev), not here — it references PROJECT.svc.id.goog, which only
 # exists once a cluster does.
+
+resource "google_service_account_iam_member" "ci_manages_bindings" {
+  for_each = {
+    backup          = google_service_account.backup.name
+    external_secret = google_service_account.external_secrets.name
+  }
+
+  service_account_id = each.value
+  role               = "roles/iam.serviceAccountAdmin"
+  member             = "serviceAccount:${google_service_account.ci.email}"
+}
