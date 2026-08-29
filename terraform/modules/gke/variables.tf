@@ -89,12 +89,13 @@ variable "stateful_node_count" {
 
 variable "stateful_image_type" {
   description = <<-EOT
-    Node image for the stateful pool. UBUNTU_CONTAINERD because Longhorn requires
-    iscsiadm on the host and Container-Optimized OS neither ships it nor allows
-    installing it. Change this only if the storage layer changes.
+    Node image for the stateful pool. COS_CONTAINERD, the GKE default: Longhorn's
+    iscsi requirement is met by its GKE COS node agent rather than by the image,
+    and Ubuntu images do not ship open-iscsi either, so switching away buys
+    nothing and gives up COS's smaller, better-hardened surface.
   EOT
   type        = string
-  default     = "UBUNTU_CONTAINERD"
+  default     = "COS_CONTAINERD"
 }
 
 variable "stateful_disk_size" {

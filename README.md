@@ -44,9 +44,11 @@ cluster, so these manifests still work on a local k3d cluster once the trial
 credit is gone.
 
 That portability has a price, and it is worth naming: Longhorn needs `iscsiadm`
-on the host, which GKE's default Container-Optimized OS neither ships nor allows
-installing. The stateful pool therefore runs **Ubuntu** node images while the
-spot pool keeps COS. A managed RWX service would not have imposed that.
+and the `iscsi_tcp` module on the host, which no GKE node image provides —
+Longhorn's docs recommend Ubuntu on GKE "since it contains open-iscsi already",
+but on a GKE Ubuntu 24.04 node it does not. The requirement is met by Longhorn's
+GKE COS node agent, a privileged DaemonSet that loads the module and runs
+`iscsid` in a container. A managed RWX service would not have needed that.
 
 ## Layout
 

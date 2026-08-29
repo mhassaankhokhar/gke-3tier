@@ -100,16 +100,18 @@ resource "google_container_node_pool" "stateful" {
     disk_size_gb = var.stateful_disk_size
     disk_type    = "pd-balanced"
 
-    # Ubuntu, not the GKE default Container-Optimized OS.
+    # Container-Optimized OS on both pools.
     #
-    # Longhorn needs iscsiadm (open-iscsi) present on the host. COS does not ship
-    # it and cannot install it — the filesystem is read-only by design — so
-    # longhorn-manager crashloops with "please make sure you have
-    # iscsiadm/open-iscsi installed on the host". Ubuntu images include it.
+    # Longhorn needs iscsiadm and the iscsi_tcp module on the host. Neither GKE
+    # image provides them: Longhorn's docs recommend Ubuntu on GKE "since it
+    # contains open-iscsi already", but on a GKE Ubuntu 24.04 node it does not —
+    # `kubectl debug node/... -- chroot /host which iscsiadm` finds nothing. The
+    # documentation is stale, so switching images buys nothing and gives up COS's
+    # smaller, better-hardened surface.
     #
-    # This is the node-image cost of choosing Longhorn for portability over a
-    # managed RWX service. Only the stateful pool pays it; the spot pool keeps
-    # COS, which is the smaller and better-hardened image.
+    # The requirement is met instead by Longhorn's GKE COS node agent, deployed
+    # from the GitOps repo, which loads the kernel module and runs iscsid in a
+    # container.
     image_type = var.stateful_image_type
 
     # Longhorn replicates volumes across nodes itself, so the pool must not be
