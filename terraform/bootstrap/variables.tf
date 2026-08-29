@@ -53,5 +53,6 @@ variable "readable_secrets" {
     "argocd-gitops-ssh-key",
     "tailscale-oauth-client-id",
     "tailscale-oauth-client-secret",
+    "postgres-app-password",
   ]
 }
