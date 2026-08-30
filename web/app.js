@@ -69,6 +69,29 @@ app.use(session({
     },
 }));
 
+// Liveness: is this process alive? Nothing else.
+//
+// The probes used to point at `/`, which renders the page — calling the api,
+// which queries Postgres. Under load that took 2-5 seconds while the probe's
+// default timeout is 1, so Kubernetes killed pods that were healthy and merely
+// busy. The remaining pods took their share of the load and were killed in
+// turn: web restarted 9 and 11 times during a load test before anyone looked
+// at why.
+//
+// Declared before the router so it stays cheap and cannot be affected by
+// session handling or anything downstream.
+app.get('/healthz', function (req, res) {
+    res.status(200).json({ status: 'ok' });
+});
+
+// Readiness: should this pod receive traffic? The session store matters here —
+// without Redis every request would create a new session — but failing this
+// only removes the pod from the Service rather than killing it.
+app.get('/readyz', function (req, res) {
+    if (redisClient.isReady) return res.status(200).json({ status: 'ok' });
+    res.status(503).json({ status: 'redis unavailable' });
+});
+
 app.use('/', routes);
 
 // catch 404 and forward to error handler

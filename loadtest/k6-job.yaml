@@ -1,0 +1,92 @@
+# Runs the load test from inside the cluster, inside the mesh.
+#
+# Why in-cluster: against us-central1 from Pakistan, three round trips of ~250ms
+# dominate every measurement. The same page took 803ms externally and 3ms from a
+# pod — an external run measures the tester's internet connection.
+#
+# Why inside the mesh, with a sidecar: the app namespace runs STRICT mTLS behind
+# a deny-all AuthorizationPolicy. A pod without a sidecar cannot present a
+# certificate and is refused, so a "load test" from outside the mesh would
+# measure nothing but rejections.
+#
+# On the STATEFUL pool. The tiers under test run on spot; a generator sharing
+# those nodes competes for the CPU the HPA is reacting to.
+#
+# Deliberately NOT in the GitOps repository. The AuthorizationPolicy below opens
+# the web tier to one more identity, and that opening should exist while a test
+# is running and not a minute longer. Applied by hand, deleted after.
+#
+#   kubectl create configmap k6-script --from-file=load.js=loadtest/load.js -n app --dry-run=client -o yaml | kubectl apply -f -
+#   kubectl apply -f loadtest/k6-job.yaml
+#   kubectl logs -f job/k6 -n app
+#   kubectl delete -f loadtest/k6-job.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: k6
+  namespace: app
+---
+# The opening, scoped to this one identity. Same shape as the gateway's rule:
+# a principal Envoy verifies from the mTLS certificate, not a namespace that any
+# pod could sit in.
+apiVersion: security.istio.io/v1
+kind: AuthorizationPolicy
+metadata:
+  name: web-allow-k6
+  namespace: app
+spec:
+  selector:
+    matchLabels:
+      app: web
+  action: ALLOW
+  rules:
+    - from:
+        - source:
+            principals: ["cluster.local/ns/app/sa/k6"]
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: k6
+  namespace: app
+spec:
+  backoffLimit: 0
+  template:
+    metadata:
+      annotations:
+        # Envoy does not exit when the main container finishes, so a Job with a
+        # sidecar never completes. This tells Istio to shut the proxy down once
+        # k6 is done.
+        sidecar.istio.io/inject: "true"
+    spec:
+      restartPolicy: Never
+      serviceAccountName: k6
+      nodeSelector:
+        workload: stateful
+      containers:
+        - name: k6
+          image: grafana/k6:1.4.0
+          args: ["run", "/scripts/load.js"]
+          env:
+            - name: SCENARIO
+              value: "capacity"
+            # Straight at the web Service, through the mesh. This bypasses the
+            # ingress gateway and its TLS on purpose: the question is how the
+            # application scales, not how fast Envoy terminates a handshake.
+            - name: BASE_URL
+              value: "http://web.app.svc.cluster.local"
+          volumeMounts:
+            - name: script
+              mountPath: /scripts
+          resources:
+            # Half a core reserved so the generator is not itself the bottleneck
+            # — a throttled load generator reports the app as slow.
+            requests:
+              cpu: 500m
+              memory: 256Mi
+            limits:
+              memory: 512Mi
+      volumes:
+        - name: script
+          configMap:
+            name: k6-script
