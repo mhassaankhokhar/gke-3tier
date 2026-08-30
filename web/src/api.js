@@ -12,8 +12,14 @@ const json = async (res) => {
   return body;
 };
 
-export const listSubscriptions = (status) =>
-  fetch(`/api/subscriptions${status ? `?status=${status}` : ''}`).then(json);
+// Returns { data, total, limit, offset }. The endpoint is paginated because an
+// unbounded list grew with the table — 363KB at 1,275 rows — so the caller has
+// to carry the offset rather than assume it received everything.
+export const listSubscriptions = ({ status, limit = 50, offset = 0 } = {}) => {
+  const q = new URLSearchParams({ limit, offset });
+  if (status) q.set('status', status);
+  return fetch(`/api/subscriptions?${q}`).then(json);
+};
 
 export const getSummary = () => fetch('/api/summary').then(json);
 

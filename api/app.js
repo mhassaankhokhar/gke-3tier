@@ -63,18 +63,50 @@ function validate(body, { partial = false } = {}) {
 }
 
 // ── list ──────────────────────────────────────────────────────────────────
+//
+// Paginated, and not as a nicety. Returning every row made this response grow
+// with the table: at 1,275 subscriptions it was 363KB, so a load test that
+// wrote rows was steadily changing the thing it was measuring. An endpoint
+// whose cost depends on how long the system has been running is one that gets
+// slower in production for no visible reason.
+const MAX_LIMIT = 100;
+const DEFAULT_LIMIT = 50;
+
 app.get('/api/subscriptions', async (req, res, next) => {
   try {
     const { status } = req.query;
-    // Parameterised, not interpolated. The value comes from a query string, and
-    // string-building a WHERE clause from user input is how SQL injection
-    // happens — no less so because this one looks like a harmless enum.
-    const { rows } = status
-      ? await pool.query(
-          'SELECT * FROM subscriptions WHERE status = $1 ORDER BY next_renewal',
-          [status])
-      : await pool.query('SELECT * FROM subscriptions ORDER BY next_renewal');
-    res.json(rows);
+
+    // Clamped, not trusted. Without a ceiling ?limit=1000000 is a request to
+    // serialise the whole table — the same unbounded response, just asked for
+    // politely.
+    const limit = Math.min(
+      Math.max(parseInt(req.query.limit, 10) || DEFAULT_LIMIT, 1), MAX_LIMIT);
+    const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
+
+    // Two queries rather than one with a window function: the count is what
+    // lets a client know there is a next page, and keeping it separate means
+    // the row query stays a plain index scan.
+    const where = status ? 'WHERE status = $1' : '';
+    const params = status ? [status] : [];
+
+    const [rows, total] = await Promise.all([
+      pool.query(
+        `SELECT * FROM subscriptions ${where}
+         ORDER BY next_renewal, id
+         LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
+        [...params, limit, offset]),
+      pool.query(`SELECT COUNT(*)::int AS n FROM subscriptions ${where}`, params),
+    ]);
+
+    // ORDER BY includes id as a tiebreaker. Without it, rows sharing a
+    // next_renewal have no defined order between queries, so paging through
+    // them can show one row twice and skip another.
+    res.json({
+      data: rows.rows,
+      total: total.rows[0].n,
+      limit,
+      offset,
+    });
   } catch (err) { next(err); }
 });
 
@@ -148,7 +180,7 @@ app.get('/api/summary', async (req, res, next) => {
     const cached = await cache.get('summary');
     if (cached) return res.set('X-Cache', 'HIT').json(cached);
 
-    const [totals, upcoming, unused] = await Promise.all([
+    const [totals, upcoming, unused, unusedTotal] = await Promise.all([
       // Yearly costs are divided to a monthly figure so the two are comparable;
       // comparing a yearly subscription's sticker price against a monthly one
       // is how these apps end up lying about the total.
@@ -163,11 +195,21 @@ app.get('/api/summary', async (req, res, next) => {
         WHERE status = 'active' AND next_renewal <= CURRENT_DATE + INTERVAL '30 days'
         ORDER BY next_renewal LIMIT 10`),
       // The trimming list: paid for, and untouched for two months.
+      //
+      // Capped at 20. It is a list of things to act on, and nobody cancels 400
+      // subscriptions in one sitting — but an uncapped version made this
+      // response 107KB, which then had to be serialised, cached in Redis and
+      // sent on every page load. The saving total below still counts all of
+      // them, so the number stays honest even though the list is trimmed.
       pool.query(`
         SELECT id, name, cost, currency, last_used FROM subscriptions
         WHERE status = 'active'
           AND (last_used IS NULL OR last_used < CURRENT_DATE - INTERVAL '60 days')
-        ORDER BY cost DESC`),
+        ORDER BY cost DESC LIMIT 20`),
+      pool.query(`
+        SELECT COALESCE(SUM(cost), 0) AS total, COUNT(*)::int AS n FROM subscriptions
+        WHERE status = 'active'
+          AND (last_used IS NULL OR last_used < CURRENT_DATE - INTERVAL '60 days')`),
     ]);
 
     const payload = {
@@ -176,8 +218,11 @@ app.get('/api/summary', async (req, res, next) => {
       active_count: Number(totals.rows[0].count),
       upcoming_renewals: upcoming.rows,
       unused: unused.rows,
-      // What cancelling everything on the unused list would save each month.
-      potential_monthly_saving: unused.rows.reduce((n, r) => n + Number(r.cost), 0),
+      unused_count: unusedTotal.rows[0].n,
+      // Summed in the database over every unused subscription, not over the
+      // 20 returned above — otherwise capping the list would quietly shrink
+      // the headline number, which is the one people act on.
+      potential_monthly_saving: Number(unusedTotal.rows[0].total),
     };
 
     await cache.set('summary', payload);

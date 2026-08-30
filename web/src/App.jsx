@@ -8,6 +8,8 @@ const money = (n, currency = 'USD') =>
 
 export default function App() {
   const [subs, setSubs] = useState([]);
+  const [total, setTotal] = useState(0);
+  const [offset, setOffset] = useState(0);
   const [summary, setSummary] = useState(null);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -16,10 +18,16 @@ export default function App() {
   // Both are refetched together after every write. The summary is aggregated
   // server-side and cached, so re-deriving it in the browser would drift from
   // what the API reports the moment the two disagree.
+  const PAGE = 50;
+
   const load = useCallback(async () => {
     try {
-      const [s, sum] = await Promise.all([api.listSubscriptions(), api.getSummary()]);
-      setSubs(s);
+      const [s, sum] = await Promise.all([
+        api.listSubscriptions({ limit: PAGE, offset }),
+        api.getSummary(),
+      ]);
+      setSubs(s.data);
+      setTotal(s.total);
       setSummary(sum);
       setError(null);
     } catch (err) {
@@ -27,7 +35,7 @@ export default function App() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [offset]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -74,7 +82,9 @@ export default function App() {
           </section>
 
           <section className="panel">
-            <h2>All subscriptions <span className="muted">({subs.length})</span></h2>
+            <h2>All subscriptions <span className="muted">
+              ({total}{total > PAGE && ` — showing ${offset + 1}–${Math.min(offset + PAGE, total)}`})
+            </span></h2>
             {subs.length === 0 ? (
               <p className="muted">Nothing tracked yet.</p>
             ) : (
@@ -103,6 +113,16 @@ export default function App() {
                   ))}
                 </tbody>
               </table>
+            )}
+            {total > PAGE && (
+              <div className="actions">
+                <button disabled={offset === 0} onClick={() => setOffset(Math.max(offset - PAGE, 0))}>
+                  Previous
+                </button>
+                <button disabled={offset + PAGE >= total} onClick={() => setOffset(offset + PAGE)}>
+                  Next
+                </button>
+              </div>
             )}
           </section>
         </>
