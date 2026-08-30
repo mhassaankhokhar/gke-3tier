@@ -1,112 +1,198 @@
-var express = require('express');
-var app = express();
-var uuid = require('node-uuid');
-
-var { Pool } = require('pg');
-const conString = {
-    user: process.env.DBUSER,
-    database: process.env.DB,
-    password: process.env.DBPASS,
-    host: process.env.DBHOST,
-    port: process.env.DBPORT,
-    ssl: process.env.DBSSL === 'true' ? { rejectUnauthorized: false } : false
-};
-
-// One pool for the process, created once.
+// Subscription tracker — the API.
 //
-// It used to be created inside the handler and ended at the end of it, which
-// meant every request opened a TCP connection, completed a TLS handshake, ran
-// one query, and threw the connection away. A pool that is created per request
-// is not a pool.
+// CRUD over one table, plus the summary the app exists for: what this costs per
+// month, what renews soon, and what has not been used in a while. The last one
+// is the point — a subscription that costs money and goes unused is the one to
+// cancel.
+const express = require('express');
+const { pool, migrate } = require('./db');
+const cache = require('./cache');
+
+const app = express();
+app.use(express.json());
+
+// ── health ────────────────────────────────────────────────────────────────
 //
-// The cost was measurable rather than theoretical: a single api replica stopped
-// keeping up at ~15 requests/second while using 0.18 of a core — it was not
-// short of CPU, it was spending the time on connection setup. `SELECT now()`
-// does not take 77ms; a TLS handshake does.
-const pool = new Pool({
-  ...conString,
-  // Bounded deliberately. Postgres allocates a backend process per connection,
-  // so an unbounded pool multiplied by every replica is how a database gets
-  // knocked over by its own application during a scale-up.
-  max: 10,
-  idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 5000,
+// Liveness asks only whether this process is alive, and touches nothing else.
+// Both probes once pointed at a handler that queried Postgres, so a slow
+// database made Kubernetes kill healthy api pods, and the survivors inherited
+// the load and were killed in turn — 11 restarts in one load test.
+app.get('/healthz', (req, res) => res.json({ status: 'ok' }));
+
+// Readiness does check the dependency: an api that cannot reach Postgres has
+// nothing to serve. Failing this removes the pod from the Service; it does not
+// kill it.
+app.get('/readyz', async (req, res) => {
+  try {
+    await pool.query('SELECT 1');
+    res.json({ status: 'ok' });
+  } catch (err) {
+    res.status(503).json({ status: 'database unreachable' });
+  }
 });
 
-// A pool emits errors for idle clients dropped by the server or the network.
-// Unhandled, they are thrown as uncaught exceptions and take the process down —
-// which under load looks like a crash loop rather than a lost connection.
-pool.on('error', (err) => {
-  console.error('postgres pool error:', err.message);
-});
+// ── validation ────────────────────────────────────────────────────────────
+const CYCLES = ['monthly', 'yearly'];
+const STATUSES = ['active', 'cancelled'];
 
-// Routes
-app.get('/api/status', function(req, res) {
-  pool.query('SELECT now() as time', (err, result) => {
-    if (err) {
-      console.error('query failed:', err.message);
-      return res.status(500).send({ error: 'database query failed' });
-    }
-    // request_uuid was always expected — web's template renders it and
-    // node-uuid was imported for it — but nothing ever set it, so the page has
-    // been showing an empty box since the beginning.
-    res.status(200).send(result.rows.map((row) => ({
-      ...row,
-      request_uuid: uuid.v4(),
-    })));
-  });
-});
+function validate(body, { partial = false } = {}) {
+  const errors = [];
+  const has = (k) => body[k] !== undefined;
+  const required = (k) => (partial ? has(k) : true);
 
-// Liveness: is this process alive? Nothing else.
-//
-// The probes used to point at /api/status, which reaches Postgres — so a slow
-// database made Kubernetes kill healthy api pods, and the pods that remained
-// took the load and were killed in turn. Web and api pods restarted 9 and 11
-// times during a load test for this reason.
-app.get('/healthz', function(req, res) {
-  res.status(200).send({ status: 'ok' });
-});
-
-// Readiness: should this pod receive traffic? Here the database does matter —
-// an api that cannot reach Postgres has nothing to serve — but failing this
-// only removes the pod from the Service, it does not kill it.
-app.get('/readyz', function(req, res) {
-  pool.query('SELECT 1', (err) => {
-    if (err) return res.status(503).send({ status: 'database unreachable' });
-    res.status(200).send({ status: 'ok' });
-  });
-});
-
-// catch 404 and forward to error handler
-app.use(function(req, res, next) {
-  var err = new Error('Not Found');
-  err.status = 404;
-  next(err);
-});
-
-// error handlers
-
-// development error handler
-// will print stacktrace
-if (app.get('env') === 'development') {
-  app.use(function(err, req, res, next) {
-    res.status(err.status || 500);
-    res.json({
-      message: err.message,
-      error: err
-    });
-  });
+  if (required('name') && (!has('name') || !String(body.name).trim())) {
+    errors.push('name is required');
+  }
+  if (required('cost')) {
+    const c = Number(body.cost);
+    if (!Number.isFinite(c) || c < 0) errors.push('cost must be a number >= 0');
+  }
+  if (required('billing_cycle') && !CYCLES.includes(body.billing_cycle)) {
+    errors.push(`billing_cycle must be one of ${CYCLES.join(', ')}`);
+  }
+  if (required('next_renewal') && Number.isNaN(Date.parse(body.next_renewal))) {
+    errors.push('next_renewal must be a date');
+  }
+  if (has('status') && !STATUSES.includes(body.status)) {
+    errors.push(`status must be one of ${STATUSES.join(', ')}`);
+  }
+  if (has('last_used') && body.last_used !== null && Number.isNaN(Date.parse(body.last_used))) {
+    errors.push('last_used must be a date or null');
+  }
+  return errors;
 }
 
-// production error handler
-// no stacktraces leaked to user
-app.use(function(err, req, res, next) {
-  res.status(err.status || 500);
-  res.json({
-    message: err.message,
-    error: {}
-  });
+// ── list ──────────────────────────────────────────────────────────────────
+app.get('/api/subscriptions', async (req, res, next) => {
+  try {
+    const { status } = req.query;
+    // Parameterised, not interpolated. The value comes from a query string, and
+    // string-building a WHERE clause from user input is how SQL injection
+    // happens — no less so because this one looks like a harmless enum.
+    const { rows } = status
+      ? await pool.query(
+          'SELECT * FROM subscriptions WHERE status = $1 ORDER BY next_renewal',
+          [status])
+      : await pool.query('SELECT * FROM subscriptions ORDER BY next_renewal');
+    res.json(rows);
+  } catch (err) { next(err); }
 });
 
+app.get('/api/subscriptions/:id', async (req, res, next) => {
+  try {
+    const { rows } = await pool.query('SELECT * FROM subscriptions WHERE id = $1', [req.params.id]);
+    if (!rows.length) return res.status(404).json({ error: 'not found' });
+    res.json(rows[0]);
+  } catch (err) { next(err); }
+});
 
-module.exports = app;
+// ── create ────────────────────────────────────────────────────────────────
+app.post('/api/subscriptions', async (req, res, next) => {
+  const errors = validate(req.body);
+  if (errors.length) return res.status(400).json({ errors });
+  try {
+    const b = req.body;
+    const { rows } = await pool.query(
+      `INSERT INTO subscriptions (name, cost, currency, billing_cycle, next_renewal, category, status, last_used, notes)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
+      [b.name, b.cost, b.currency || 'USD', b.billing_cycle, b.next_renewal,
+       b.category || null, b.status || 'active', b.last_used || null, b.notes || null]);
+    await cache.invalidate();
+    res.status(201).json(rows[0]);
+  } catch (err) { next(err); }
+});
+
+// ── update ────────────────────────────────────────────────────────────────
+app.patch('/api/subscriptions/:id', async (req, res, next) => {
+  const errors = validate(req.body, { partial: true });
+  if (errors.length) return res.status(400).json({ errors });
+
+  const allowed = ['name', 'cost', 'currency', 'billing_cycle', 'next_renewal',
+                   'category', 'status', 'last_used', 'notes'];
+  const fields = allowed.filter((k) => req.body[k] !== undefined);
+  if (!fields.length) return res.status(400).json({ error: 'no updatable fields supplied' });
+
+  try {
+    // Column names come from the allow-list above, never from the request, so
+    // only the values are ever parameterised — a field name cannot be injected
+    // because an unknown one is dropped before it reaches here.
+    const set = fields.map((k, i) => `${k} = $${i + 1}`).join(', ');
+    const values = fields.map((k) => req.body[k]);
+    const { rows } = await pool.query(
+      `UPDATE subscriptions SET ${set}, updated_at = now()
+       WHERE id = $${fields.length + 1} RETURNING *`,
+      [...values, req.params.id]);
+    if (!rows.length) return res.status(404).json({ error: 'not found' });
+    await cache.invalidate();
+    res.json(rows[0]);
+  } catch (err) { next(err); }
+});
+
+// ── delete ────────────────────────────────────────────────────────────────
+app.delete('/api/subscriptions/:id', async (req, res, next) => {
+  try {
+    const { rowCount } = await pool.query('DELETE FROM subscriptions WHERE id = $1', [req.params.id]);
+    if (!rowCount) return res.status(404).json({ error: 'not found' });
+    await cache.invalidate();
+    res.status(204).end();
+  } catch (err) { next(err); }
+});
+
+// ── summary ───────────────────────────────────────────────────────────────
+//
+// The expensive read, and the one every page load wants — so it is the one
+// that is cached. Redis is here for this rather than for sessions: a React
+// client and a JSON API have no server-side session to keep.
+app.get('/api/summary', async (req, res, next) => {
+  try {
+    const cached = await cache.get('summary');
+    if (cached) return res.set('X-Cache', 'HIT').json(cached);
+
+    const [totals, upcoming, unused] = await Promise.all([
+      // Yearly costs are divided to a monthly figure so the two are comparable;
+      // comparing a yearly subscription's sticker price against a monthly one
+      // is how these apps end up lying about the total.
+      pool.query(`
+        SELECT
+          COALESCE(SUM(CASE WHEN billing_cycle = 'monthly' THEN cost ELSE cost/12 END), 0) AS monthly,
+          COALESCE(SUM(CASE WHEN billing_cycle = 'yearly'  THEN cost ELSE cost*12 END), 0) AS yearly,
+          COUNT(*) AS count
+        FROM subscriptions WHERE status = 'active'`),
+      pool.query(`
+        SELECT id, name, cost, currency, next_renewal FROM subscriptions
+        WHERE status = 'active' AND next_renewal <= CURRENT_DATE + INTERVAL '30 days'
+        ORDER BY next_renewal LIMIT 10`),
+      // The trimming list: paid for, and untouched for two months.
+      pool.query(`
+        SELECT id, name, cost, currency, last_used FROM subscriptions
+        WHERE status = 'active'
+          AND (last_used IS NULL OR last_used < CURRENT_DATE - INTERVAL '60 days')
+        ORDER BY cost DESC`),
+    ]);
+
+    const payload = {
+      monthly_total: Number(totals.rows[0].monthly),
+      yearly_total: Number(totals.rows[0].yearly),
+      active_count: Number(totals.rows[0].count),
+      upcoming_renewals: upcoming.rows,
+      unused: unused.rows,
+      // What cancelling everything on the unused list would save each month.
+      potential_monthly_saving: unused.rows.reduce((n, r) => n + Number(r.cost), 0),
+    };
+
+    await cache.set('summary', payload);
+    res.set('X-Cache', 'MISS').json(payload);
+  } catch (err) { next(err); }
+});
+
+// ── errors ────────────────────────────────────────────────────────────────
+app.use((req, res) => res.status(404).json({ error: 'not found' }));
+
+app.use((err, req, res, next) => {
+  // Logged in full, returned in outline. A database error can carry the query
+  // and the schema, and neither belongs in an HTTP response.
+  console.error('request failed:', err.message);
+  res.status(500).json({ error: 'internal error' });
+});
+
+module.exports = { app, migrate };

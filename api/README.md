@@ -1,24 +1,21 @@
-# Devops API App
+# api
 
-## install the node packages for the api tier:
+Subscription tracker API. Express, Postgres via CloudNativePG, Redis for the
+summary aggregation.
 
-```sh
-→ npm install
+```
+GET    /api/subscriptions[?status=active]
+GET    /api/subscriptions/:id
+POST   /api/subscriptions
+PATCH  /api/subscriptions/:id
+DELETE /api/subscriptions/:id
+GET    /api/summary            totals, upcoming renewals, unused for 60+ days
+GET    /healthz                liveness — process only
+GET    /readyz                 readiness — checks Postgres
 ```
 
-## start the app
+The schema is applied at startup from `schema.sql` and is idempotent, so
+replicas racing to start cannot conflict.
 
-```sh
-→ npm start
-```
-
-## NOTE this app uses two env variables:
-
-- PORT: the listening PORT
-- DB: Name of the database to connect
-- DBUSER: Database user
-- DBPASS: DB user password,
-- DBHOST: Database hostname,
-- DBPORT: Database server listening port
-
-These variables need to be set
+Redis is a cache, not a dependency: every path through `cache.js` fails open, so
+a Redis outage makes this slower rather than broken.
