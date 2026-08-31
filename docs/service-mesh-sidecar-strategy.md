@@ -126,17 +126,30 @@ Every workload pod still receives the privileged `istio-init` container running
 `istio-iptables`, and the injector's own values confirm why:
 
 ```
-istio_cni: ABSENT
+pilot.cni.enabled: false
 ```
 
 istiod was never told the agent exists, so it keeps injecting the init container
-that needs `NET_ADMIN` and `NET_RAW`. The point of running the CNI agent is to
-move that capability out of every application pod and into one DaemonSet — which
-is currently not happening. The chart is deployed, the benefit is not.
+that applies the rules itself. Reading the 1.30.4 injection template, that is the
+branch which adds `NET_ADMIN` and `NET_RAW`, runs as uid 0, and leaves the root
+filesystem writable. The other branch injects `istio-validation` with
+`--run-validation --skip-rule-apply`: capabilities `drop: ALL`, read-only root,
+uid 1337, and it only checks that the agent already did the work.
 
-Fixing it is a values change on `11-istiod.yaml`, and it needs care: pods
-injected while the two sides disagree get no iptables rules at all, and their
-traffic silently bypasses the mesh — mTLS that appears to be on and is not.
+So the cost of the gap is not theoretical — it is those three capabilities, in
+every application pod, today.
+
+**Fixed** by setting `cni.enabled: true` on `11-istiod.yaml` (the chart maps it
+to `pilot.cni`; verified by rendering 1.30.4 locally before pushing). The change
+touches only newly created pods; existing ones keep the rules they already have.
+
+One gap remains and is deliberately not closed yet. Istio's protection against a
+pod landing on a node whose agent is not ready is the `cni.istio.io/not-ready`
+taint plus the untaint controller, and the chart is explicit that the *cluster
+operator* must have the infrastructure apply that taint — GKE does not. Adding it
+to the node pools means a taint change in Terraform, which recreates the pools.
+Until then the safety net is `istio-validation` itself: it fails the pod rather
+than letting it start outside the mesh.
 
 ## What is deliberately outside the mesh
 
