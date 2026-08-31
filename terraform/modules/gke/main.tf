@@ -156,6 +156,64 @@ resource "google_container_node_pool" "stateful" {
   }
 }
 
+# ── Probe pool: one spot e2-standard-2, to measure rather than assume ────────
+#
+# Exists to answer one question with a number instead of a claim: how much of a
+# non-shared-core node is actually schedulable, on spot.
+#
+# The reason to ask is that e2-medium is shared-core — Compute Engine's own API
+# reports isSharedCpu: true for it and false for e2-standard-2 — and GKE
+# reserves a flat 1060m on shared-core instead of the usual 6%+1%. So an
+# e2-medium reports cpu=2 and offers 940m, while an e2-standard-2 reports the
+# same cpu=2 and offers 1930m. That much is already visible in this cluster.
+# What is not yet visible is whether spot changes it, because the only
+# e2-standard-2 nodes here are on-demand.
+#
+# It carries workload=stateless-probe, NOT stateless. Nothing moves onto it:
+# every application pod selects workload=stateless, and this is a different
+# value. DaemonSets have no selector, so they do land — which is the other half
+# of the measurement, since the per-node agent floor is what makes a small node
+# expensive.
+#
+# Delete by setting probe_pool_enabled = false. It is a measurement, not
+# infrastructure, and it should not outlive the answer.
+resource "google_container_node_pool" "probe" {
+  count = var.probe_pool_enabled ? 1 : 0
+
+  name       = "${var.name}-probe"
+  cluster    = google_container_cluster.main.id
+  location   = var.zone
+  node_count = 1
+
+  node_config {
+    machine_type = "e2-standard-2"
+    disk_size_gb = var.spot_disk_size
+    disk_type    = "pd-balanced"
+    spot         = true
+
+    labels = {
+      workload = "stateless-probe"
+    }
+
+    service_account = var.node_service_account
+    oauth_scopes    = ["https://www.googleapis.com/auth/cloud-platform"]
+
+    workload_metadata_config {
+      mode = "GKE_METADATA"
+    }
+
+    shielded_instance_config {
+      enable_secure_boot          = true
+      enable_integrity_monitoring = true
+    }
+  }
+
+  management {
+    auto_repair  = true
+    auto_upgrade = true
+  }
+}
+
 # ── Stateless pool: spot, autoscaled, labelled workload=stateless ────────────
 resource "google_container_node_pool" "spot" {
   name     = "${var.name}-spot"

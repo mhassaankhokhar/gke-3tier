@@ -132,3 +132,14 @@ variable "spot_disk_size" {
   type    = number
   default = 30
 }
+
+variable "probe_pool_enabled" {
+  description = <<-EOT
+    Creates one spot e2-standard-2 node labelled workload=stateless-probe, to
+    measure allocatable on a non-shared-core machine before deciding whether the
+    stateless pool should move to it. Nothing schedules onto it but DaemonSets.
+    Turn off once the number is recorded.
+  EOT
+  type        = bool
+  default     = false
+}
