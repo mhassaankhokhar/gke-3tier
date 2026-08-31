@@ -171,6 +171,29 @@ mTLS layer adds a failure mode and no security.
 The mesh boundary therefore stops at `api`. `api` → Postgres is encrypted by
 CloudNativePG, not by Envoy.
 
+## The numbers are on a dashboard, not only in this file
+
+`Mesh — Sidecar Cost` (uid `sidecar-cost`, in `manifests/monitoring/` in the
+GitOps repo) carries the reserved-versus-used comparison live, so the argument
+above can be re-checked rather than trusted. `Mesh — Subscription Tracker`
+carries request rate, latency percentiles, response codes and mTLS coverage.
+
+Two corrections had to go into the capacity queries, and both are worth knowing
+because the obvious expression is wrong in the same way on any cluster:
+
+- **The proxy's request is not in `kube_pod_container_resource_requests`.** As a
+  native sidecar it is an init container, so it appears in
+  `kube_pod_init_container_resource_requests` instead. A capacity dashboard
+  summing only the container metric silently omits the largest request in the
+  pod — here 100m against the application's own 50m.
+- **kube-state-metrics keeps reporting requests for pods that have finished.**
+  Without a `kube_pod_status_phase{phase="Running"}` filter, the completed k6 Job
+  went on reserving half a core forever.
+
+With both applied the per-node totals agree with `kubectl describe node` to
+within a millicore. That agreement is the check — a capacity panel that cannot
+reproduce the scheduler's own arithmetic is not measuring capacity.
+
 ## When to move to ambient
 
 Not on cost. The triggers are:
