@@ -107,14 +107,27 @@ variable "stateful_disk_size" {
 # ── Spot pool ────────────────────────────────────────────────────────────────
 variable "spot_machine_type" {
   description = <<-EOT
-    Runs web/api only — two Node/Express services at roughly 250 MB each.
-    e2-medium (1 vCPU / 4 GB) is sized for that; e2-standard-2 was an unexamined
-    default and left most of the node idle. Smaller nodes also make HPA scaling
-    visible instead of theoretical, and keep max scale-out at 4 + 3 = 7 vCPU,
-    inside the 8 vCPU a trial project typically gets per region.
+    Runs web/api. e2-standard-2 after measuring both, on spot, in this cluster:
+
+      e2-medium        allocatable  940m   agent floor 596m   left  344m
+      e2-standard-2    allocatable 1930m   agent floor 730m   left 1200m
+
+    e2-medium is shared-core — Compute Engine reports isSharedCpu: true for it
+    and false for e2-standard-2 — so GKE reserves a flat 1060m on it instead of
+    the usual 6% + 1%. Both report cpu=2; one delivers 940m and the other 1930m.
+
+    The per-node DaemonSet floor is what makes the difference matter. It is
+    nearly fixed, so on the small node it took 63% before an application pod ran
+    and there was room for exactly four. Paying half for a quarter of the usable
+    capacity is not a saving.
+
+    This replaces an earlier note claiming e2-medium is "1 vCPU / 4 GB" and that
+    the small node kept scale-out inside an 8 vCPU quota. Both were wrong: it
+    reports 2 vCPU and counts as 2 against E2_CPUS, so the quota arithmetic is
+    identical for either type — see spot_max_nodes.
   EOT
   type        = string
-  default     = "e2-medium"
+  default     = "e2-standard-2"
 }
 
 variable "spot_min_nodes" {
@@ -122,6 +135,11 @@ variable "spot_min_nodes" {
   default = 1
 }
 
+# E2_CPUS in this region is 8, and every machine here is E2 at 2 vCPU each. The
+# stable pool takes 4, so this pool can reach 2 nodes before the quota binds —
+# max 3 is a ceiling the quota will not honour. Left as is deliberately: the
+# autoscaler simply stops at what it can get, and raising the quota is a request
+# to Google rather than a change to this file.
 variable "spot_max_nodes" {
   description = "Ceiling for HPA-driven scale-out. Low on purpose — a runaway HPA on a trial credit is a real way to lose it."
   type        = number

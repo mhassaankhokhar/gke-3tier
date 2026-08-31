@@ -50,13 +50,11 @@ module "gke" {
 
   authorized_networks = var.authorized_networks
 
-  # Temporary. One spot e2-standard-2 to measure allocatable on a
-  # non-shared-core machine, because the stateless pool's e2-medium loses 1060m
-  # to GKE's shared-core reservation and the comparison should be a number, not
-  # an argument. Nothing schedules onto it — it is labelled workload=stateless-probe
-  # and every application pod selects workload=stateless. Set back to false once
-  # the measurement is recorded.
-  probe_pool_enabled = true
+  # The probe has served its purpose — spot e2-standard-2 measured 1930m
+  # allocatable against e2-medium's 940m, and the stateless pool now uses that
+  # type. The measurement lives in spot_machine_type's description; the pool
+  # does not need to.
+  probe_pool_enabled = false
 }
 
 module "artifact_registry" {
