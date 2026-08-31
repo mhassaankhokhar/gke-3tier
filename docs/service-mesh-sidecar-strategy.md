@@ -143,6 +143,15 @@ every application pod, today.
 to `pilot.cni`; verified by rendering 1.30.4 locally before pushing). The change
 touches only newly created pods; existing ones keep the rules they already have.
 
+Confirmed after the sync with a server-side dry run — which runs the admission
+webhooks and creates nothing:
+
+```
+before   istio-init        add=[NET_ADMIN, NET_RAW]  runAsUser=0     roRootFS=false
+after    istio-validation  drop=[ALL]                runAsUser=1337  roRootFS=true
+                           --run-validation --skip-rule-apply
+```
+
 One gap remains and is deliberately not closed yet. Istio's protection against a
 pod landing on a node whose agent is not ready is the `cni.istio.io/not-ready`
 taint plus the untaint controller, and the chart is explicit that the *cluster
