@@ -51,8 +51,51 @@ resource "helm_release" "external_secrets" {
     }
 
     # Stable pool: every other component waits on the secrets this produces.
+    #
+    # This key reaches the controller only. The chart gives the webhook and the
+    # cert-controller their own blocks, and both were running unpinned — on the
+    # stable pool by luck rather than by instruction, one preemption from spot.
     nodeSelector = {
       workload = "stateful"
+    }
+
+    # The webhook validates every ExternalSecret and SecretStore with
+    # failurePolicy: Fail, so while it is unreachable none of them can be
+    # written. On one replica that is a single node's decision — and it was
+    # sharing a node with istiod and the CloudNativePG operator, which have the
+    # same property.
+    #
+    # topologySpreadConstraints rather than required podAntiAffinity: with two
+    # stable nodes a hard anti-affinity leaves a rolling update with nowhere to
+    # put the new pod. matchLabelKeys scopes the constraint to one revision so
+    # the outgoing ReplicaSet does not block the incoming one. Same arrangement
+    # as cert-manager, istiod and CloudNativePG in the GitOps repo.
+    webhook = {
+      replicaCount = 2
+      nodeSelector = {
+        workload = "stateful"
+      }
+      topologySpreadConstraints = [{
+        maxSkew           = 1
+        topologyKey       = "kubernetes.io/hostname"
+        whenUnsatisfiable = "DoNotSchedule"
+        matchLabelKeys    = ["pod-template-hash"]
+        labelSelector = {
+          matchLabels = {
+            "app.kubernetes.io/name"     = "external-secrets-webhook"
+            "app.kubernetes.io/instance" = "external-secrets"
+          }
+        }
+      }]
+    }
+
+    # Not replicated: it issues the webhook's certificate rather than gating
+    # writes, so its absence delays a rotation instead of rejecting anything.
+    # Pinned for the same reason as the rest.
+    certController = {
+      nodeSelector = {
+        workload = "stateful"
+      }
     }
   })]
 
