@@ -55,5 +55,6 @@ variable "readable_secrets" {
     "tailscale-oauth-client-secret",
     "postgres-app-password",
     "web-session-secret",
+    "grafana-admin-password",
   ]
 }
