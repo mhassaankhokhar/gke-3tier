@@ -12,38 +12,20 @@
 # On the STATEFUL pool. The tiers under test run on spot; a generator sharing
 # those nodes competes for the CPU the HPA is reacting to.
 #
-# Deliberately NOT in the GitOps repository. The AuthorizationPolicy below opens
-# the web tier to one more identity, and that opening should exist while a test
-# is running and not a minute longer. Applied by hand, deleted after.
+# The k6 ServiceAccount and the AuthorizationPolicy opening web to it used to be
+# in this file. They are not any more: they live in the GitOps repository, in
+# manifests/app/overlays/loadtest, and Argo CD owns them. Keeping copies here
+# would mean two owners for the same objects — the mistake that had Terraform
+# and Argo CD fighting over Argo CD's own release. Selecting that overlay is
+# what grants the access; selecting dev again is what withdraws it.
+#
+# Only the Job is applied by hand, because a Job is an action rather than a
+# desired state:
 #
 #   kubectl create configmap k6-script --from-file=load.js=loadtest/load.js -n app --dry-run=client -o yaml | kubectl apply -f -
 #   kubectl apply -f loadtest/k6-job.yaml
 #   kubectl logs -f job/k6 -n app
 #   kubectl delete -f loadtest/k6-job.yaml
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: k6
-  namespace: app
----
-# The opening, scoped to this one identity. Same shape as the gateway's rule:
-# a principal Envoy verifies from the mTLS certificate, not a namespace that any
-# pod could sit in.
-apiVersion: security.istio.io/v1
-kind: AuthorizationPolicy
-metadata:
-  name: web-allow-k6
-  namespace: app
-spec:
-  selector:
-    matchLabels:
-      app: web
-  action: ALLOW
-  rules:
-    - from:
-        - source:
-            principals: ["cluster.local/ns/app/sa/k6"]
----
 apiVersion: batch/v1
 kind: Job
 metadata:
