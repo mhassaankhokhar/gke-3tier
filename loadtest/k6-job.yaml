@@ -61,13 +61,24 @@ spec:
             - name: script
               mountPath: /scripts
           resources:
-            # Half a core reserved so the generator is not itself the bottleneck
-            # — a throttled load generator reports the app as slow.
+            # Memory quadrupled with maxVUs going from 400 to 2000 — a VU is a
+            # goroutine holding its own connection state, and that is what
+            # actually scales with the pool.
+            #
+            # CPU stays at half a core, and deliberately: the stable nodes have
+            # 272m and 629m unreserved, so a larger request would leave this pod
+            # Pending — checked before writing it. There is no CPU limit, so the
+            # request bounds only what the scheduler sets aside, not what the
+            # generator may use; the node runs at roughly a third of its
+            # capacity, so the headroom is real. A throttled load generator
+            # reports the application as slow, which is the one failure mode a
+            # load test must not have — and a limit, not a request, is what
+            # would throttle it.
             requests:
               cpu: 500m
-              memory: 256Mi
+              memory: 1Gi
             limits:
-              memory: 512Mi
+              memory: 2Gi
       volumes:
         - name: script
           configMap:

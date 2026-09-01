@@ -33,13 +33,32 @@ const scenarios = {
   capacity: {
     executor: 'ramping-arrival-rate',
     startRate: 20, timeUnit: '1s',
-    preAllocatedVUs: 50, maxVUs: 400,
+    // 2000, not 400. An arrival-rate executor is only an open model while it
+    // has VUs to spare; run out and it silently becomes a closed one, where the
+    // system under test decides the load instead of the test deciding it. Three
+    // runs logged "Insufficient VUs, reached 400 active VUs" and all three
+    // reported ~116 req/s against a 320/s target — the generator's number, not
+    // the application's.
+    //
+    // The size comes from Little's Law rather than a guess: at the measured
+    // peak, L = 324 requests were in flight toward api at once (read directly
+    // from envoy_cluster_upstream_rq_active, not derived). A VU is busy for the
+    // whole of one request, so the pool has to exceed the concurrency the target
+    // rate implies, with room for the generator's own overhead.
+    preAllocatedVUs: 200, maxVUs: 2000,
+    // 2 minutes per stage, not 40 seconds.
+    //
+    // Prometheus scrapes envoy every 10s (17-monitoring.yaml), so a rate window
+    // needs ~40s to hold enough samples to be stable. At 40s stages that window
+    // spanned three of them and every per-stage number came out smeared — the
+    // curve's shape was readable and its values were not. A 2-minute stage lets
+    // the window sit entirely inside one load level.
     stages: [
-      { target: 40,  duration: '40s' },
-      { target: 80,  duration: '40s' },
-      { target: 140, duration: '40s' },
-      { target: 220, duration: '40s' },
-      { target: 320, duration: '40s' },
+      { target: 40,  duration: '2m' },
+      { target: 80,  duration: '2m' },
+      { target: 140, duration: '2m' },
+      { target: 220, duration: '2m' },
+      { target: 320, duration: '2m' },
     ],
   },
   traffic: {
@@ -121,6 +140,11 @@ export function handleSummary(data) {
       line('requests', m.http_reqs.values.count),
       line('req/s', m.http_reqs.values.rate.toFixed(1)),
       line('failed', `${(m.http_req_failed.values.rate * 100).toFixed(2)}%`),
+      // avg first, and not as decoration: Little's Law (L = lambda x W) needs the
+      // mean, and p50 is not it. This run had a p50 of 68ms against a mean an
+      // order of magnitude higher, because the tail carries the weight — using
+      // the median would understate concurrency by that same factor.
+      line('mean latency', `${d.avg.toFixed(0)} ms`),
       line('p50 latency', `${d['p(50)'].toFixed(0)} ms`),
       line('p95 latency', `${d['p(95)'].toFixed(0)} ms`),
       line('p99 latency', `${d['p(99)'].toFixed(0)} ms`),
@@ -128,6 +152,13 @@ export function handleSummary(data) {
       line('writes', m.writes ? m.writes.values.count : 0),
       line('summary cache hits', m.summary_cache_hits
         ? `${(m.summary_cache_hits.values.rate * 100).toFixed(1)}%` : 'n/a'),
+      '',
+      // Little's Law, computed here so the run states its own concurrency
+      // instead of leaving it to be reconstructed afterwards. If `concurrency`
+      // approaches `VUs max` the generator was the limit and the throughput
+      // figure describes k6, not the application.
+      line('concurrency L=lambda*W', (m.http_reqs.values.rate * (d.avg / 1000)).toFixed(0)),
+      line('VUs max', m.vus_max ? m.vus_max.values.max : 'n/a'),
       '',
     ].join('\n'),
   };
