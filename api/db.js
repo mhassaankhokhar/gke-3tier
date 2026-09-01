@@ -23,7 +23,18 @@ const pool = new Pool({
   // Bounded deliberately: Postgres allocates a backend process per connection,
   // so an unbounded pool times every replica is how an application knocks over
   // its own database during a scale-up.
-  max: 10,
+  //
+  // 25, raised from 10 after a load test showed the old number was the ceiling.
+  // All six api pods held exactly 10 connections for the whole run while
+  // Postgres reported 60 of them idle and no lock contention — the connections
+  // were open and doing nothing, and the eleventh request waited in this pool,
+  // where neither Envoy nor Postgres can see it. The queue that formed showed
+  // up one hop earlier, at web's proxy.
+  //
+  // The bound above still holds and decides the number: six pods at 25 is 150
+  // connections, so max_connections went to 200 in the CloudNativePG cluster
+  // first. Raising this without that would fail at peak load.
+  max: 25,
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 5000,
 });
