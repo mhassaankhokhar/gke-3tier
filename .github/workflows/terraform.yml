@@ -158,18 +158,26 @@ jobs:
             -backend-config="bucket=${{ vars.TF_BACKEND_BUCKET }}" \
             -backend-config="prefix=gke-3tier/envs/dev"
 
-      # module.gke depends on module.network's VPC/subnet outputs, but nothing
-      # references the NAT gateway or router — so a plain `terraform destroy`
-      # is free to tear NAT down in parallel with module.argocd. The Tailscale
-      # operator inside the cluster needs that NAT for egress to
-      # controlplane.tailscale.com to clear its own Service finalizer; lose
-      # NAT first and that finalizer hangs forever. A depends_on can't fix
-      # this without a cycle (network -> argocd -> ... -> gke -> network), so
-      # this destroys the in-cluster module first, while NAT and the cluster
-      # are still up, then destroys everything else.
+      # Both modules install controllers (Argo CD, External Secrets Operator)
+      # that own finalizers on resources Terraform doesn't know about —
+      # ExternalSecrets and Applications created by other in-cluster
+      # controllers, not by these helm_release resources. `helm uninstall`
+      # deletes the controller pods as part of the release; if any of those
+      # foreign resources are still Terminating at that moment, nothing is
+      # left to clear their finalizer and the uninstall hangs until Helm's
+      # own timeout (confirmed both ways: module.argocd hung on
+      # tailscale.com/finalizer once NAT died mid-uninstall; a later run hung
+      # the same way on externalsecrets.io/externalsecret-cleanup with NAT
+      # untouched, so this is a controller-vs-finalizer ordering problem, not
+      # only a NAT/egress one). module.gke also references only
+      # module.network's VPC/subnet, not its NAT or router, so nothing forces
+      # NAT to outlive either controller either — destroying both here first,
+      # while the cluster and network are still fully up, sidesteps all of
+      # it. A depends_on can't express this without a cycle (network ->
+      # argocd -> ... -> gke -> network).
       - name: Destroy in-cluster resources first
         working-directory: terraform/envs/dev
-        run: terraform apply -destroy -target=module.argocd -auto-approve -input=false -no-color
+        run: terraform apply -destroy -target=module.argocd -target=module.cluster_seed -auto-approve -input=false -no-color
 
       - name: Destroy the rest
         working-directory: terraform/envs/dev
