@@ -17,6 +17,12 @@ on:
     branches: [main]
     paths: ["terraform/**", ".github/workflows/terraform.yml"]
   workflow_dispatch:
+    inputs:
+      action:
+        description: "plan (normal apply) or destroy (tear down envs/dev)"
+        type: choice
+        options: [plan, destroy]
+        default: plan
 
 # id-token is what lets GitHub mint the OIDC token federation trades for GCP
 # credentials. Without it auth fails with a misleading "unable to get credentials"
@@ -64,7 +70,9 @@ jobs:
       - name: Plan
         id: plan
         working-directory: terraform/envs/dev
-        run: terraform plan -out=tfplan -input=false -no-color
+        env:
+          DESTROY_FLAG: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'destroy' && '-destroy' || '' }}
+        run: terraform plan $DESTROY_FLAG -out=tfplan -input=false -no-color
 
       # The plan pins exactly what apply will do, so apply cannot drift from what
       # was reviewed. Short retention: a plan carries resource detail and goes
