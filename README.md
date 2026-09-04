@@ -12,103 +12,7 @@ load-test harness; every Kubernetes manifest lives in the separate
 [`gke-3tier-gitops`](https://github.com/mhassaankhokhar/gke-3tier-gitops)
 repo that Argo CD reads.
 
-```
-user
-  │ https
-  ▼
-Cloudflare (DNS, TLS) ──▶ GCP Load Balancer ──▶ Istio ingress gateway
-                                                       │  mTLS
-                              ┌────────────────────────┴────────────────────────┐
-                              │  GKE cluster                                    │
-                              │                                                 │
-                              │  web (nginx + React) ──mTLS──▶ api (Node/Express)│
-                              │  spot pool, HPA 2-6            spot pool, HPA 2-6│
-                              │                                   │        │    │
-                              │                              mTLS │        │mTLS│
-                              │                                   ▼        ▼    │
-                              │                              Redis    Postgres  │
-                              │                              (cache)  CloudNativePG
-                              │                              stable pool, 2 instances
-                              │                              Postgres: own TLS, outside the mesh
-                              └─────────────────────────────────────────────────┘
-```
-
-## Architecture Deck
-
-<details>
-<summary><strong>11-slide walkthrough</strong> — architecture, infrastructure, the four pillars, and measured capacity. Click to expand, then use the <strong>Next →</strong> link under each slide.</summary>
-
-> GitHub's README viewer doesn't run JavaScript, so this isn't a real slide player —
-> each "Next" jumps to the next image further down this page rather than swapping one
-> frame for another. It works, but it's a long scroll, not a deck. The source
-> [`.pptx`](docs/deck/gke-3tier-full-deck.pptx) is in this repo if you'd rather flip
-> through it in PowerPoint.
-
-<a id="deck-1"></a>
-<p align="center"><img src="docs/deck/slide-01.jpg" width="820" alt="Slide 1 — Title"></p>
-<p align="center"><a href="#deck-2">Next →</a></p>
-
----
-
-<a id="deck-2"></a>
-<p align="center"><img src="docs/deck/slide-02.jpg" width="820" alt="Slide 2 — Key Points"></p>
-<p align="center"><a href="#deck-1">← Prev</a>&nbsp;&nbsp;·&nbsp;&nbsp;<a href="#deck-3">Next →</a></p>
-
----
-
-<a id="deck-3"></a>
-<p align="center"><img src="docs/deck/slide-03.jpg" width="820" alt="Slide 3 — The Goal"></p>
-<p align="center"><a href="#deck-2">← Prev</a>&nbsp;&nbsp;·&nbsp;&nbsp;<a href="#deck-4">Next →</a></p>
-
----
-
-<a id="deck-4"></a>
-<p align="center"><img src="docs/deck/slide-04.jpg" width="820" alt="Slide 4 — Architecture Diagram"></p>
-<p align="center"><a href="#deck-3">← Prev</a>&nbsp;&nbsp;·&nbsp;&nbsp;<a href="#deck-5">Next →</a></p>
-
----
-
-<a id="deck-5"></a>
-<p align="center"><img src="docs/deck/slide-05.jpg" width="820" alt="Slide 5 — Infrastructure Highlights"></p>
-<p align="center"><a href="#deck-4">← Prev</a>&nbsp;&nbsp;·&nbsp;&nbsp;<a href="#deck-6">Next →</a></p>
-
----
-
-<a id="deck-6"></a>
-<p align="center"><img src="docs/deck/slide-06.jpg" width="820" alt="Slide 6 — High Performance"></p>
-<p align="center"><a href="#deck-5">← Prev</a>&nbsp;&nbsp;·&nbsp;&nbsp;<a href="#deck-7">Next →</a></p>
-
----
-
-<a id="deck-7"></a>
-<p align="center"><img src="docs/deck/slide-07.jpg" width="820" alt="Slide 7 — Resilience"></p>
-<p align="center"><a href="#deck-6">← Prev</a>&nbsp;&nbsp;·&nbsp;&nbsp;<a href="#deck-8">Next →</a></p>
-
----
-
-<a id="deck-8"></a>
-<p align="center"><img src="docs/deck/slide-08.jpg" width="820" alt="Slide 8 — Secure"></p>
-<p align="center"><a href="#deck-7">← Prev</a>&nbsp;&nbsp;·&nbsp;&nbsp;<a href="#deck-9">Next →</a></p>
-
----
-
-<a id="deck-9"></a>
-<p align="center"><img src="docs/deck/slide-09.jpg" width="820" alt="Slide 9 — Cost Optimized"></p>
-<p align="center"><a href="#deck-8">← Prev</a>&nbsp;&nbsp;·&nbsp;&nbsp;<a href="#deck-10">Next →</a></p>
-
----
-
-<a id="deck-10"></a>
-<p align="center"><img src="docs/deck/slide-10.jpg" width="820" alt="Slide 10 — Measured Capacity"></p>
-<p align="center"><a href="#deck-9">← Prev</a>&nbsp;&nbsp;·&nbsp;&nbsp;<a href="#deck-11">Next →</a></p>
-
----
-
-<a id="deck-11"></a>
-<p align="center"><img src="docs/deck/slide-11.jpg" width="820" alt="Slide 11 — Summary"></p>
-<p align="center"><a href="#deck-10">← Prev</a>&nbsp;&nbsp;·&nbsp;&nbsp;<a href="#deck-1">↺ Back to start</a></p>
-
-</details>
+<p align="center"><img src="docs/deck/slide-04.jpg" width="820" alt="Architecture diagram: user through Cloudflare DNS and GCP Load Balancer into the Istio ingress gateway, then mTLS to the Web tier (nginx + React, spot pool) and API tier (Node/Express, spot pool), each with an Istio sidecar, and on to Redis cache and the CloudNativePG Postgres cluster in the stable pool, outside the mesh with its own TLS"></p>
 
 ## Why this exists
 
@@ -131,8 +35,8 @@ are portable and which were really cloud-vendor features.
 ## What's actually running
 
 Everything below is measured or read from the live cluster, not aspirational —
-see the [architecture deck](#architecture-deck) for the numbers behind each
-line.
+see the [architecture deck](docs/deck/gke-3tier-full-deck.pptx) for the numbers
+behind each line.
 
 - **Mesh.** Istio sidecars on every application pod, `PeerAuthentication`
   STRICT, and a namespace-wide `deny-all` `AuthorizationPolicy` with each
@@ -158,7 +62,7 @@ line.
 - **Capacity.** Load-tested inside the cluster and inside the mesh (an
   external run mostly measures the tester's own internet connection). Mean
   latency holds flat at ~7 ms up to ~32 req/s; past that the curve bends. Full
-  method and numbers: [`docs/deck`](#architecture-deck) and
+  method and numbers: [`docs/deck`](docs/deck) and
   [`loadtest/`](loadtest/).
 
 ## Storage, and why most of it is now boring
@@ -250,8 +154,8 @@ Built to outlive the trial credit rather than depend on it:
 Live, load-tested, and running the full pipeline described above — not a
 scaffold. What's explicitly not proven yet: the true capacity ceiling. Every
 load-test run so far was bound by the generator, not the application, so the
-measured numbers in the [deck](#architecture-deck) are a floor, not a
-maximum.
+measured numbers in the [deck](docs/deck/gke-3tier-full-deck.pptx) are a floor,
+not a maximum.
 
 ## License
 
