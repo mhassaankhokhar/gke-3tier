@@ -17,12 +17,6 @@ on:
     branches: [main]
     paths: ["terraform/**", ".github/workflows/terraform.yml"]
   workflow_dispatch:
-    inputs:
-      action:
-        description: "plan (normal apply) or destroy (tear down envs/dev)"
-        type: choice
-        options: [plan, destroy]
-        default: plan
 
 # id-token is what lets GitHub mint the OIDC token federation trades for GCP
 # credentials. Without it auth fails with a misleading "unable to get credentials"
@@ -45,11 +39,6 @@ env:
 jobs:
   plan:
     name: Plan
-    # Skipped for a destroy dispatch — see the destroy job below, which plans
-    # and applies its own two steps directly rather than through this
-    # artifact hand-off (a saved plan goes stale the moment state changes
-    # underneath it, which the destroy job's first step always does).
-    if: github.event_name != 'workflow_dispatch' || github.event.inputs.action != 'destroy'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -98,9 +87,9 @@ jobs:
 
   apply:
     name: Apply
-    # Only on main, and never for a destroy dispatch (see the destroy job).
-    # A PR gets the plan for review; nothing is applied until it merges.
-    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.action != 'destroy')
+    # Only on main. A PR gets the plan for review; nothing is applied until it
+    # merges.
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     needs: plan
     runs-on: ubuntu-latest
     # Add required reviewers to this environment to make the apply wait for an
@@ -133,52 +122,3 @@ jobs:
       - name: Apply
         working-directory: terraform/envs/dev
         run: terraform apply -input=false tfplan
-
-  destroy:
-    name: Destroy
-    if: github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'destroy'
-    runs-on: ubuntu-latest
-    environment: production
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: google-github-actions/auth@v3
-        with:
-          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
-
-      - uses: hashicorp/setup-terraform@v4
-        with:
-          terraform_version: ${{ env.TF_VERSION }}
-
-      - name: Init
-        working-directory: terraform/envs/dev
-        run: |
-          terraform init \
-            -backend-config="bucket=${{ vars.TF_BACKEND_BUCKET }}" \
-            -backend-config="prefix=gke-3tier/envs/dev"
-
-      # Both modules install controllers (Argo CD, External Secrets Operator)
-      # that own finalizers on resources Terraform doesn't know about —
-      # ExternalSecrets and Applications created by other in-cluster
-      # controllers, not by these helm_release resources. `helm uninstall`
-      # deletes the controller pods as part of the release; if any of those
-      # foreign resources are still Terminating at that moment, nothing is
-      # left to clear their finalizer and the uninstall hangs until Helm's
-      # own timeout (confirmed both ways: module.argocd hung on
-      # tailscale.com/finalizer once NAT died mid-uninstall; a later run hung
-      # the same way on externalsecrets.io/externalsecret-cleanup with NAT
-      # untouched, so this is a controller-vs-finalizer ordering problem, not
-      # only a NAT/egress one). module.gke also references only
-      # module.network's VPC/subnet, not its NAT or router, so nothing forces
-      # NAT to outlive either controller either — destroying both here first,
-      # while the cluster and network are still fully up, sidesteps all of
-      # it. A depends_on can't express this without a cycle (network ->
-      # argocd -> ... -> gke -> network).
-      - name: Destroy in-cluster resources first
-        working-directory: terraform/envs/dev
-        run: terraform apply -destroy -target=module.argocd -target=module.cluster_seed -auto-approve -input=false -no-color
-
-      - name: Destroy the rest
-        working-directory: terraform/envs/dev
-        run: terraform apply -destroy -auto-approve -input=false -no-color
