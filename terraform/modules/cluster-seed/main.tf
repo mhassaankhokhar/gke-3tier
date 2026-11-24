@@ -118,6 +118,13 @@ resource "helm_release" "seed" {
   namespace = var.argocd_namespace
   chart     = "${path.module}/chart"
 
+  # The seed lands in argocd's namespace before ArgoCD is installed, and only
+  # module.argocd (which depends on this module) would otherwise create it. On an
+  # empty cluster that fails with `namespaces "argocd" not found`; it passed in
+  # August only because ArgoCD was already installed. Helm accepts an existing
+  # namespace, so module.argocd's own create_namespace still works after this.
+  create_namespace = true
+
   values = [yamlencode({
     projectId         = var.project_id
     clusterName       = var.cluster_name
