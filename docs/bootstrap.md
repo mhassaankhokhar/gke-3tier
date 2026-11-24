@@ -141,18 +141,28 @@ also creates. Terraform evaluates provider configuration before it knows what an
 apply will produce, so on a completely empty state the first run has nothing to
 read the cluster from.
 
-Target the cluster once, then apply normally:
+The symptom is a failed plan with
+`Error: projects/<project>/locations/<zone>/clusters/gke-3tier not found` on
+`data.google_container_cluster.main` — on a fresh project, and again after every
+destroy.
+
+Target the cluster once, through the pipeline, then run normally:
 
 ```bash
-cd terraform/envs/dev
-terraform init -backend-config=backend.hcl
-terraform apply -target=module.gke     # first run on an empty state only
-terraform apply                        # everything, including ArgoCD
+gh workflow run terraform.yml -f target=module.gke   # first run on an empty state only
+gh workflow run terraform.yml                        # everything, including ArgoCD
 ```
+
+The `target` input is a fixed choice, empty by default, so push and pull-request
+runs never use it. The saved plan carries the `-target` into the apply job.
 
 This is the one place `-target` is the right tool: it is ordering a single first
 apply, not standing in for a structural boundary the way it was misused for the
-bootstrap. Every later run — and every CI run — is a plain `terraform apply`.
+bootstrap. Every later run is a plain plan and apply.
+
+It is still a manual step a rebuild has to remember. The structural fix is to
+split `envs/dev` into a cluster configuration and a platform configuration with
+separate state, applied in that order — not done yet.
 
 Reading the ArgoCD password afterwards:
 

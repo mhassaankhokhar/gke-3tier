@@ -17,6 +17,17 @@ on:
     branches: [main]
     paths: ["terraform/**", ".github/workflows/terraform.yml"]
   workflow_dispatch:
+    inputs:
+      # Only for the first run on an empty state. versions.tf configures the
+      # helm/kubernetes providers from a live lookup of the cluster, which fails
+      # with "clusters/gke-3tier not found" until the cluster exists. Dispatch
+      # once with module.gke, then every later run is a plain plan/apply.
+      # A choice, not free text, so the input cannot inject other flags.
+      target:
+        description: "First apply on an empty state only: create the cluster first"
+        type: choice
+        options: ["", "module.gke"]
+        default: ""
 
 # id-token is what lets GitHub mint the OIDC token federation trades for GCP
 # credentials. Without it auth fails with a misleading "unable to get credentials"
@@ -64,7 +75,11 @@ jobs:
       - name: Plan
         id: plan
         working-directory: terraform/envs/dev
-        run: terraform plan -out=tfplan -input=false -no-color
+        # Empty on push and pull_request, so those runs are unchanged. The saved
+        # plan carries the -target into the apply job.
+        env:
+          TARGET: ${{ github.event.inputs.target }}
+        run: terraform plan ${TARGET:+-target="$TARGET"} -out=tfplan -input=false -no-color
 
       # The plan pins exactly what apply will do, so apply cannot drift from what
       # was reviewed. Short retention: a plan carries resource detail and goes
