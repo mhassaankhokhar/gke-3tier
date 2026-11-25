@@ -45,6 +45,37 @@ resource "helm_release" "argocd" {
     applicationSet = { replicas = 1 }
 
     server = { replicas = 1 }
+
+    # Makes the app-of-apps sync waves wait. Argo CD 1.8 removed the health
+    # assessment for argoproj.io/Application, so without this every child app
+    # counts as Healthy the moment it is created. The root app then starts wave 8
+    # straight after wave 7. On the 2026-11-25 rebuild, app (wave 8) synced
+    # about 2.5 min before the postgres Cluster (wave 7) existed, and api
+    # crash-looped on its startup migration until Postgres came up.
+    #
+    # It has to be here, not only in the GitOps repo: the waves run on the first
+    # sync, which uses this install's argocd-cm. argocd/apps/08-argocd.yaml
+    # carries the same key so it stays in place after that Application takes
+    # over the chart. Script as given in the Argo CD docs (operator-manual/health,
+    # "Argocd App").
+    configs = {
+      cm = {
+        "resource.customizations.health.argoproj.io_Application" = <<-EOT
+          hs = {}
+          hs.status = "Progressing"
+          hs.message = ""
+          if obj.status ~= nil then
+            if obj.status.health ~= nil then
+              hs.status = obj.status.health.status
+              if obj.status.health.message ~= nil then
+                hs.message = obj.status.health.message
+              end
+            end
+          end
+          return hs
+        EOT
+      }
+    }
   })]
 
   # The chart creates CRDs and controllers that take a moment to become ready;
