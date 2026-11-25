@@ -92,10 +92,17 @@ jobs:
         run: npm ci
 
       # Neither package.json declares a test script yet, so this asserts the
-      # weaker but still real thing: the entrypoint parses.
+      # weaker but still real thing: the code parses. The api's entrypoint is
+      # app.js; web is a Vite app with no app.js, so `node --check app.js`
+      # failed every run there — its equivalent is the bundle building.
       - name: Smoke check
         working-directory: ${{ matrix.service }}
-        run: node --check app.js
+        run: |
+          if [ "${{ matrix.service }}" = "web" ]; then
+            npm run build
+          else
+            node --check app.js
+          fi
 
       # Build only, no registry login — proves the Dockerfile is sound without
       # needing any GCP credential.

@@ -29,6 +29,19 @@ on:
         options: ["", "module.gke"]
         default: ""
 
+# Every run here — PR plan, merge apply, dispatch — locks the same state file.
+# Without a group they run side by side, and the second fails with "Error
+# acquiring the state lock" (412). That happened on 2026-11-24 when a PR was
+# merged 15 s after opening, while its own plan still held the lock.
+#
+# One group for all triggers so they queue instead. cancel-in-progress stays
+# false: cancelling a running apply can leave state half-written. GitHub keeps
+# only one pending run per group, so if three queue up the middle one is dropped
+# — acceptable, because the newest run plans against the newest main.
+concurrency:
+  group: terraform-envs-dev
+  cancel-in-progress: false
+
 # id-token is what lets GitHub mint the OIDC token federation trades for GCP
 # credentials. Without it auth fails with a misleading "unable to get credentials"
 # rather than a missing-permission error.
