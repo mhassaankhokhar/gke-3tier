@@ -45,6 +45,20 @@ resource "google_container_cluster" "main" {
     services_secondary_range_name = var.services_range_name
   }
 
+  # Dataplane V2 (eBPF/Cilium) instead of kube-proxy and iptables, chiefly
+  # because it enforces NetworkPolicy natively. Before this, the cluster had no
+  # policy controller, so the API server accepted
+  # gke-3tier-gitops/manifests/postgres/networkpolicy.yaml and nothing enforced
+  # it: any pod could reach Postgres. No separate network_policy block is set,
+  # because that block configures Calico and GKE rejects it alongside
+  # ADVANCED_DATAPATH.
+  #
+  # This is a literal, not a variable. GKE cannot change the datapath on a
+  # running cluster, so changing this value destroys and recreates the cluster,
+  # and on an empty state that needs the targeted first apply described in
+  # docs/bootstrap.md.
+  datapath_provider = "ADVANCED_DATAPATH"
+
   private_cluster_config {
     enable_private_nodes = true
     # The control plane keeps a public endpoint: a private endpoint would need a
