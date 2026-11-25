@@ -1,7 +1,4 @@
-# Both values go into the GitHub repository as Actions *variables* (not secrets).
-# Neither is a credential: the provider name only identifies which trust
-# relationship to use, and it is useless without a token from the one repository
-# the binding allows.
+# Set as GitHub Actions variables, not secrets; neither is a credential.
 output "provider_name" {
   description = "Pass to google-github-actions/auth as workload_identity_provider"
   value       = google_iam_workload_identity_pool_provider.github.name

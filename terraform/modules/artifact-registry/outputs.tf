@@ -8,9 +8,7 @@ output "repository_name" {
   value       = google_artifact_registry_repository.main.name
 }
 
-# The prefix every image path is built from. CI appends "/api:tag" or
-# "/web:tag" — deriving it here keeps the region and project out of the
-# workflow files, which is what lets the repo stay publishable.
+# Image path prefix; CI appends /api:tag or /web:tag.
 output "repository_url" {
   description = "Image path prefix, e.g. asia-south1-docker.pkg.dev/PROJECT/gke-3tier"
   value       = "${google_artifact_registry_repository.main.location}-docker.pkg.dev/${google_artifact_registry_repository.main.project}/${google_artifact_registry_repository.main.name}"

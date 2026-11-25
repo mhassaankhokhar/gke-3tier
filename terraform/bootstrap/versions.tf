@@ -8,10 +8,7 @@ terraform {
     }
   }
 
-  # Same bucket as infra, different prefix — that is what makes the two states
-  # independent. One bucket keeps the bootstrap simple; the prefixes keep a
-  # destroy in one from touching the other.
-  #
+  # Same bucket as envs/, different prefix, so the states are independent.
   #   terraform init -backend-config=backend.hcl
   backend "gcs" {}
 }

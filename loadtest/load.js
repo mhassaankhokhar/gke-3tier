@@ -1,19 +1,8 @@
 // Load profiles for the subscription tracker.
-//
-// Two scenarios, because they answer different questions:
-//   capacity  how many requests per second this can serve before latency breaks
-//   traffic   how it behaves under a plausible number of real users
-//
-//   SCENARIO=capacity k6 run loadtest/load.js
-//
-// Run in-cluster (loadtest/k6-job.yaml). From a laptop in Pakistan against
-// us-central1, three round trips of ~250ms dominate everything: the same page
-// measured 803ms externally and 3ms from a pod.
-//
-// The request mix is weighted the way this app is actually used: mostly
-// reading, occasionally writing. A pure-GET test would miss the write path
-// entirely and make the cache look better than it is, since /api/summary is
-// cached for 60s and every write invalidates it.
+//   capacity  max requests/s before latency breaks (SCENARIO=capacity)
+//   traffic   behaviour under a plausible number of users
+// Run in-cluster (loadtest/k6-job.yaml); from outside, network latency dominates.
+// Read-heavy mix with writes, so the summary cache is measured under invalidation.
 import http from 'k6/http';
 import { check } from 'k6';
 import { Rate, Counter } from 'k6/metrics';
@@ -26,33 +15,15 @@ const cacheHits = new Rate('summary_cache_hits');
 const writes = new Counter('writes');
 
 const scenarios = {
-  // Open model: iterations start at a fixed rate whether or not earlier ones
-  // finished. A closed model with think time can only ever produce the rate you
-  // dialled in, so it can never find the ceiling — under an arrival rate the
-  // queue builds when the system falls behind, and latency shows it.
+  // Open model (arrival rate), so a falling-behind system shows up as latency.
   capacity: {
     executor: 'ramping-arrival-rate',
     startRate: 20, timeUnit: '1s',
-    // 2000, not 400. An arrival-rate executor is only an open model while it
-    // has VUs to spare; run out and it silently becomes a closed one, where the
-    // system under test decides the load instead of the test deciding it. Three
-    // runs logged "Insufficient VUs, reached 400 active VUs" and all three
-    // reported ~116 req/s against a 320/s target — the generator's number, not
-    // the application's.
-    //
-    // The size comes from Little's Law rather than a guess: at the measured
-    // peak, L = 324 requests were in flight toward api at once (read directly
-    // from envoy_cluster_upstream_rq_active, not derived). A VU is busy for the
-    // whole of one request, so the pool has to exceed the concurrency the target
-    // rate implies, with room for the generator's own overhead.
+    // Sized from Little's Law against the measured peak concurrency (~324 in
+    // flight). Too few VUs silently turns this into a closed model and the result
+    // measures k6, not the app.
     preAllocatedVUs: 200, maxVUs: 2000,
-    // 2 minutes per stage, not 40 seconds.
-    //
-    // Prometheus scrapes envoy every 10s (17-monitoring.yaml), so a rate window
-    // needs ~40s to hold enough samples to be stable. At 40s stages that window
-    // spanned three of them and every per-stage number came out smeared — the
-    // curve's shape was readable and its values were not. A 2-minute stage lets
-    // the window sit entirely inside one load level.
+    // 2-minute stages so the Prometheus rate window (10s scrapes) fits inside one level.
     stages: [
       { target: 40,  duration: '2m' },
       { target: 80,  duration: '2m' },
@@ -86,14 +57,11 @@ export const options = {
 const CYCLES = ['monthly', 'yearly'];
 
 export default function () {
-  // 70 / 20 / 10. Weighted rather than round-robin so the mix holds at any
-  // rate — a rotation would tie the write rate to the number of VUs.
+  // 70/20/10, random so the mix holds at any rate.
   const roll = Math.random();
 
   if (roll < 0.70) {
-    // The expensive read, and the cached one. Tracking the hit rate matters:
-    // if writes invalidate it faster than the TTL refills it, the cache stops
-    // being a cache and every request pays for three aggregate queries.
+    // Cached read; writes invalidate it, so watch the hit rate.
     const res = http.get(`${BASE}/api/summary`, { tags: { name: 'summary' } });
     const ok = check(res, {
       'summary 200': (r) => r.status === 200,
@@ -103,9 +71,7 @@ export default function () {
     cacheHits.add(res.headers['X-Cache'] === 'HIT');
 
   } else if (roll < 0.90) {
-    // A page, not the table. The endpoint is paginated now; asking for
-    // everything was what made this response grow as the test wrote rows, so
-    // the test was steadily changing what it measured.
+    // One page, not the whole table.
     const res = http.get(`${BASE}/api/subscriptions?status=active&limit=50`, { tags: { name: 'list' } });
     errors.add(!check(res, {
       'list 200': (r) => r.status === 200,
@@ -113,9 +79,7 @@ export default function () {
     }));
 
   } else {
-    // A write, which also invalidates the summary cache — so the read path
-    // above is measured against a cache under real churn rather than one that
-    // is never disturbed.
+    // Writes also invalidate the summary cache.
     const res = http.post(`${BASE}/api/subscriptions`, JSON.stringify({
       name: `loadtest-${__VU}-${__ITER}`,
       cost: Math.round(Math.random() * 5000) / 100,
@@ -140,10 +104,7 @@ export function handleSummary(data) {
       line('requests', m.http_reqs.values.count),
       line('req/s', m.http_reqs.values.rate.toFixed(1)),
       line('failed', `${(m.http_req_failed.values.rate * 100).toFixed(2)}%`),
-      // avg first, and not as decoration: Little's Law (L = lambda x W) needs the
-      // mean, and p50 is not it. This run had a p50 of 68ms against a mean an
-      // order of magnitude higher, because the tail carries the weight — using
-      // the median would understate concurrency by that same factor.
+      // Mean, not p50: Little's Law (L = λW) needs the mean.
       line('mean latency', `${d.avg.toFixed(0)} ms`),
       line('p50 latency', `${d['p(50)'].toFixed(0)} ms`),
       line('p95 latency', `${d['p(95)'].toFixed(0)} ms`),
@@ -153,10 +114,7 @@ export function handleSummary(data) {
       line('summary cache hits', m.summary_cache_hits
         ? `${(m.summary_cache_hits.values.rate * 100).toFixed(1)}%` : 'n/a'),
       '',
-      // Little's Law, computed here so the run states its own concurrency
-      // instead of leaving it to be reconstructed afterwards. If `concurrency`
-      // approaches `VUs max` the generator was the limit and the throughput
-      // figure describes k6, not the application.
+      // If this approaches VUs max, the generator was the limit, not the app.
       line('concurrency L=lambda*W', (m.http_reqs.values.rate * (d.avg / 1000)).toFixed(0)),
       line('VUs max', m.vus_max ? m.vus_max.values.max : 'n/a'),
       '',

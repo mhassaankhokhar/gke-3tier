@@ -20,9 +20,7 @@ output "workload_identity_pool" {
   value       = "${var.project_id}.svc.id.goog"
 }
 
-# Surfaced so manifests pin themselves by label rather than repeating the string.
-# Neither pool is tainted — see main.tf for why — so placement is entirely a
-# nodeSelector decision made by each workload.
+# Workloads pin themselves with nodeSelector on these labels; pools are untainted.
 output "node_labels" {
   description = "workload label values: pin Postgres and Longhorn to stateful, prefer stateless for web/api"
   value = {

@@ -1,13 +1,5 @@
-// Redis, used for what it is actually good at here.
-//
-// It arrived in this project as a session store for a server-rendered web tier.
-// A React client talking to a JSON API has no server-side session, so that
-// reason is gone — and rather than keep a component with no purpose, it now
-// caches the summary aggregation, which is three queries every page load wants.
-//
-// Every write path calls invalidate(). A cache that is only ever written to and
-// never cleared shows stale totals a few seconds after someone adds a
-// subscription, which is exactly when they are looking at the number.
+// Caches the summary aggregation. Every write path calls invalidate(), so
+// totals are never stale after a change.
 const { createClient } = require('redis');
 
 const TTL_SECONDS = 60;
@@ -19,8 +11,7 @@ let available = false;
 if (process.env.REDIS_URL) {
   client = createClient({ url: process.env.REDIS_URL });
   client.on('error', (err) => {
-    // Logged once per state change rather than per failure: a Redis outage
-    // otherwise fills the log at request rate and hides everything else.
+    // Logged once per state change, not per failure.
     if (available) console.error('redis error:', err.message);
     available = false;
   });
@@ -28,9 +19,7 @@ if (process.env.REDIS_URL) {
   client.connect().catch((err) => console.error('redis connect failed:', err.message));
 }
 
-// Every function below fails open. Redis is a cache: if it is down the app
-// should be slower, not broken. Treating a cache as a hard dependency turns an
-// optimisation into a second thing that can take the service offline.
+// Fails open: if Redis is down the app is slower, not broken.
 async function get(key) {
   if (!available) return null;
   try {

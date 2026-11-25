@@ -1,14 +1,6 @@
-# dev environment — applied by CI, never by hand.
-#
-# One directory per environment, each with its own state and its own backend
-# config. Not Terraform CLI workspaces: those keep every environment's state in
-# one backend behind one set of credentials, so an apply in the wrong workspace
-# reaches production. HashiCorp's own guidance points them at temporary parallel
-# copies (a per-PR stack), not at environment separation.
-#
-# Identity lives in bootstrap/ with its own state. This configuration READS those
-# accounts and never creates them, so `terraform destroy` here removes the
-# cluster, network and registry and leaves the pipeline able to rebuild them.
+# dev environment, applied by CI. Own directory and state per environment
+# (not CLI workspaces). Identity is read from bootstrap's state, so a destroy
+# here leaves the pipeline able to rebuild.
 
 data "terraform_remote_state" "bootstrap" {
   backend = "gcs"
@@ -44,16 +36,12 @@ module "gke" {
   pods_range_name     = module.network.pods_range_name
   services_range_name = module.network.services_range_name
 
-  # Scoped account from bootstrap, instead of the default compute one which
-  # carries project Editor.
+  # Scoped node account from bootstrap, not the default compute account.
   node_service_account = local.node_sa
 
   authorized_networks = var.authorized_networks
 
-  # The probe has served its purpose — spot e2-standard-2 measured 1930m
-  # allocatable against e2-medium's 940m, and the stateless pool now uses that
-  # type. The measurement lives in spot_machine_type's description; the pool
-  # does not need to.
+  # Measurement done; result is in spot_machine_type's description.
   probe_pool_enabled = false
 }
 
@@ -63,38 +51,27 @@ module "artifact_registry" {
   name   = var.name
   region = var.region
 
-  # Registry access is granted on the repository rather than as a project role,
-  # so neither account can reach images outside this one repository.
+  # Registry access is granted on the repository, not the project.
   node_service_account = local.node_sa
   ci_service_account   = local.ci_sa
 }
 
-# Binds the CloudNativePG Kubernetes service account to the GCP backup account.
-#
-# Here, not in bootstrap, because it references PROJECT.svc.id.goog — the
-# Workload Identity pool that exists only once a cluster with
-# workload_identity_config does. Next to module.gke, the ordering comes from the
-# dependency graph rather than from a rule someone has to remember.
+# CloudNativePG KSA → GCP backup account. Here, not in bootstrap: it needs the
+# cluster's Workload Identity pool.
 resource "google_service_account_iam_member" "postgres_backup" {
   service_account_id = local.backup_sa
   role               = "roles/iam.workloadIdentityUser"
   member             = "serviceAccount:${module.gke.workload_identity_pool}[${var.backup_namespace}/${var.backup_ksa_name}]"
 }
 
-# Lets External Secrets Operator impersonate its GCP account, so it can read the
-# Cloudflare token from Secret Manager with no key file anywhere.
-#
-# Here rather than in bootstrap for the same reason as the Postgres binding: it
-# references PROJECT.svc.id.goog, which exists only once a cluster does.
+# ESO KSA → its GCP account, for reading the Cloudflare token. Here for the same reason.
 resource "google_service_account_iam_member" "external_secrets" {
   service_account_id = local.eso_sa
   role               = "roles/iam.workloadIdentityUser"
   member             = "serviceAccount:${module.gke.workload_identity_pool}[${var.eso_namespace}/${var.eso_ksa_name}]"
 }
 
-# The seed: External Secrets, the ClusterSecretStore, and the deploy key ArgoCD
-# reads the GitOps repository with. These cannot come from Git, because each is
-# required to read Git.
+# ESO, the ClusterSecretStore and ArgoCD's deploy key: needed to read Git, so not from Git.
 module "cluster_seed" {
   source = "../../modules/cluster-seed"
 
@@ -106,18 +83,13 @@ module "cluster_seed" {
 
   depends_on = [
     module.gke,
-    # The Workload Identity binding must exist before ESO tries to impersonate,
-    # or the first secret sync fails with a permissions error.
+    # The binding must exist before ESO's first secret sync.
     google_service_account_iam_member.external_secrets,
   ]
 }
 
-# ArgoCD — installed after the seed, so the repo credential is already present
-# when its root Application first tries to clone.
-#
-# Terraform stops here: everything else inside the cluster (cert-manager,
-# external-dns, Longhorn, CloudNativePG, the application) arrives as ArgoCD
-# Applications reconciled from the separate gke-3tier-gitops repository.
+# ArgoCD, after the seed so the repo credential exists. Everything else in the
+# cluster comes from the gke-3tier-gitops repository.
 module "argocd" {
   source = "../../modules/argocd"
 

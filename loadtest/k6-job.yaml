@@ -1,26 +1,7 @@
-# Runs the load test from inside the cluster, inside the mesh.
-#
-# Why in-cluster: against us-central1 from Pakistan, three round trips of ~250ms
-# dominate every measurement. The same page took 803ms externally and 3ms from a
-# pod — an external run measures the tester's internet connection.
-#
-# Why inside the mesh, with a sidecar: the app namespace runs STRICT mTLS behind
-# a deny-all AuthorizationPolicy. A pod without a sidecar cannot present a
-# certificate and is refused, so a "load test" from outside the mesh would
-# measure nothing but rejections.
-#
-# On the STATEFUL pool. The tiers under test run on spot; a generator sharing
-# those nodes competes for the CPU the HPA is reacting to.
-#
-# The k6 ServiceAccount and the AuthorizationPolicy opening web to it used to be
-# in this file. They are not any more: they live in the GitOps repository, in
-# manifests/app/overlays/loadtest, and Argo CD owns them. Keeping copies here
-# would mean two owners for the same objects — the mistake that had Terraform
-# and Argo CD fighting over Argo CD's own release. Selecting that overlay is
-# what grants the access; selecting dev again is what withdraws it.
-#
-# Only the Job is applied by hand, because a Job is an action rather than a
-# desired state:
+# Runs the load test inside the cluster and the mesh: the app namespace is
+# STRICT mTLS behind deny-all, so the generator needs a sidecar. Stateful pool,
+# so it doesn't compete with the spot tiers under test. The k6 ServiceAccount and
+# AuthorizationPolicy live in gke-3tier-gitops (overlays/loadtest).
 #
 #   kubectl create configmap k6-script --from-file=load.js=loadtest/load.js -n app --dry-run=client -o yaml | kubectl apply -f -
 #   kubectl apply -f loadtest/k6-job.yaml
@@ -36,9 +17,7 @@ spec:
   template:
     metadata:
       annotations:
-        # Envoy does not exit when the main container finishes, so a Job with a
-        # sidecar never completes. This tells Istio to shut the proxy down once
-        # k6 is done.
+        # Shuts the sidecar down when k6 exits, so the Job can complete.
         sidecar.istio.io/inject: "true"
     spec:
       restartPolicy: Never
@@ -52,28 +31,15 @@ spec:
           env:
             - name: SCENARIO
               value: "capacity"
-            # Straight at the web Service, through the mesh. This bypasses the
-            # ingress gateway and its TLS on purpose: the question is how the
-            # application scales, not how fast Envoy terminates a handshake.
+            # Direct to the web Service, bypassing the gateway: measures the app, not TLS termination.
             - name: BASE_URL
               value: "http://web.app.svc.cluster.local"
           volumeMounts:
             - name: script
               mountPath: /scripts
           resources:
-            # Memory quadrupled with maxVUs going from 400 to 2000 — a VU is a
-            # goroutine holding its own connection state, and that is what
-            # actually scales with the pool.
-            #
-            # CPU stays at half a core, and deliberately: the stable nodes have
-            # 272m and 629m unreserved, so a larger request would leave this pod
-            # Pending — checked before writing it. There is no CPU limit, so the
-            # request bounds only what the scheduler sets aside, not what the
-            # generator may use; the node runs at roughly a third of its
-            # capacity, so the headroom is real. A throttled load generator
-            # reports the application as slow, which is the one failure mode a
-            # load test must not have — and a limit, not a request, is what
-            # would throttle it.
+            # Memory scales with maxVUs. CPU request is what the stable nodes can fit; no
+            # CPU limit, because a throttled generator reports the app as slow.
             requests:
               cpu: 500m
               memory: 1Gi

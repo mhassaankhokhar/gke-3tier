@@ -28,9 +28,7 @@ export default function SubscriptionForm({ initial, onSave, onCancel }) {
       await onSave({
         ...form,
         cost: Number(form.cost),
-        // Empty strings are not empty dates. Sent as '' the API's date parse
-        // fails and the request is rejected for a field the user left blank on
-        // purpose.
+        // Blank dates go as null; '' fails the API's date parse.
         last_used: form.last_used || null,
         category: form.category || null,
         notes: form.notes || null,

@@ -1,25 +1,12 @@
-# Builds the application images and tells the GitOps repository which one to run.
-#
-# The split this workflow lives on either side of:
-#
-#   this repo      application source, Dockerfiles, and this pipeline
-#   gitops repo    what the cluster runs
-#
-# It builds, pushes, then writes the new tag into the GitOps repository. Argo CD
-# notices the commit and rolls it out; nothing here talks to the cluster, and CI
-# holds no cluster credentials at all.
-#
-# That is also why the two repositories are separate: if the tag bump landed in
-# this repo, every deploy would be a commit that re-triggers this workflow. The
-# usual workaround is `[skip ci]` in the commit message, which is a convention
-# holding back an infinite loop.
+# Builds and pushes the images, then writes the new tag into gke-3tier-gitops;
+# Argo CD rolls it out. CI holds no cluster credentials. The tag lives in a
+# separate repo so a deploy commit doesn't re-trigger this workflow.
 name: Build
 
 on:
   push:
     branches: [main]
-    # Only when the applications actually change. A Terraform edit should not
-    # produce a new image, and an unchanged image should not produce a deploy.
+    # App changes only.
     paths:
       - "web/**"
       - "api/**"
@@ -28,15 +15,12 @@ on:
 
 permissions:
   contents: read
-  # Federation, same as the Terraform workflow: GitHub mints an OIDC token and
-  # GCP trades it for short-lived credentials. No service account key exists.
+  # Federation, as in terraform.yml: no service account key.
   id-token: write
 
 env:
   REGISTRY: us-central1-docker.pkg.dev
-  # One Artifact Registry repository holding both images as paths. ECR would
-  # need two repositories with two sets of IAM and lifecycle policies; Artifact
-  # Registry treats a repository as a folder.
+  # One Artifact Registry repository; images are paths within it.
   AR_REPO: gke-3tier
 
 jobs:
@@ -66,10 +50,7 @@ jobs:
         with:
           context: ./${{ matrix.app }}
           push: true
-          # Tagged with the commit SHA and nothing else — no `latest`.
-          # GitOps has to name an exact image, and a moving tag means the
-          # cluster's contents stop being a function of the repository: two
-          # syncs of the same commit could run different code.
+          # Commit SHA only, no `latest`: the cluster must run exactly what Git names.
           tags: ${{ env.REGISTRY }}/${{ vars.GCP_PROJECT_ID }}/${{ env.AR_REPO }}/${{ matrix.app }}:${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
@@ -83,10 +64,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           repository: mhassaankhokhar/gke-3tier-gitops
-          # A deploy key with write access, separate from the read-only one Argo
-          # CD reads the repository with. Argo CD must never be able to write
-          # what it reconciles, and this pipeline must never be able to read the
-          # cluster — each side holds exactly one direction.
+          # Write-only deploy key, separate from Argo CD's read-only key.
           ssh-key: ${{ secrets.GITOPS_DEPLOY_KEY }}
           path: gitops
 
@@ -105,8 +83,7 @@ jobs:
           git config user.name  "gke-3tier build"
           git config user.email "build@users.noreply.github.com"
           git add -A
-          # No-op builds happen: a workflow_dispatch on an unchanged tree, or a
-          # rerun. Committing nothing is correct, and failing on it is not.
+          # Reruns and no-op dispatches have nothing to commit.
           if git diff --cached --quiet; then
             echo "images unchanged, nothing to commit"
             exit 0
