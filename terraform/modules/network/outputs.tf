@@ -18,9 +18,7 @@ output "subnet_name" {
   value       = google_compute_subnetwork.nodes.name
 }
 
-# The GKE module references these by name rather than hardcoding the strings in
-# two places — a mismatch here fails at cluster-create time with an unhelpful
-# "secondary range not found".
+# Referenced by name in the gke module; a mismatch fails with "secondary range not found".
 output "pods_range_name" {
   description = "Secondary range name for pods"
   value       = google_compute_subnetwork.nodes.secondary_ip_range[0].range_name

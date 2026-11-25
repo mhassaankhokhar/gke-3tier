@@ -1,14 +1,5 @@
-# One Docker repository holding every image in the project.
-#
-# Artifact Registry treats a repository as a folder, so api, web and anything
-# added later live as paths inside it:
-#
-#   <region>-docker.pkg.dev/<project>/<repo>/api:v1.0.0
-#   <region>-docker.pkg.dev/<project>/<repo>/web:v1.0.0
-#
-# ECR has no such nesting — there, each image needs its own repository. Keeping
-# one repository here means IAM, cleanup policies and scanning are configured
-# once instead of once per service.
+# One Docker repository for all images; each image is a path within it
+# (<region>-docker.pkg.dev/<project>/<repo>/api), so IAM and cleanup are set once.
 
 resource "google_artifact_registry_repository" "main" {
   location      = var.region
@@ -17,19 +8,13 @@ resource "google_artifact_registry_repository" "main" {
   format        = "DOCKER"
 
   docker_config {
-    # Tags stay mutable: the deploy pipeline is tag-driven (v1.2.3) and a
-    # re-run of a failed release would be blocked by immutable tags. Immutable
-    # is the safer production setting; this project favours being able to retry.
+    # Mutable so a failed release can be re-pushed under the same tag.
     immutable_tags = false
   }
 
   # ── Cleanup ───────────────────────────────────────────────────────────────
-  # CI pushes an image on every release tag, and storage is billed per GB. Left
-  # alone this grows forever, which is a quiet way to burn a trial credit.
-  #
-  # Order matters: keep-rules win over delete-rules in Artifact Registry, so the
-  # "keep recent versions" rule below protects releases from the age-based
-  # delete rule above it.
+  # Storage is billed per GB. Keep-rules win over delete-rules, so recent
+  # versions survive the age-based delete.
 
   cleanup_policies {
     id     = "delete-untagged"
@@ -48,15 +33,11 @@ resource "google_artifact_registry_repository" "main" {
     }
   }
 
-  # Dry run first: with this true the policies only report what they would have
-  # deleted (visible in Cloud Logging) instead of deleting it. Flip to false
-  # once the reported deletions look right.
+  # true = report only (Cloud Logging). Set false once the reported deletions look right.
   cleanup_policy_dry_run = var.cleanup_dry_run
 }
 
-# Nodes pull images with their own service account, so no imagePullSecret and no
-# credential-refresh job is needed in the cluster — the thing that makes ECR on
-# Kubernetes awkward.
+# Nodes pull with their own service account: no imagePullSecret.
 resource "google_artifact_registry_repository_iam_member" "node_reader" {
   count = var.node_service_account == null ? 0 : 1
 
@@ -66,8 +47,7 @@ resource "google_artifact_registry_repository_iam_member" "node_reader" {
   member     = "serviceAccount:${var.node_service_account}"
 }
 
-# The CI pipeline pushes; it authenticates through Workload Identity Federation,
-# so this grant is to the federated service account, not to a stored key.
+# Granted to the federated CI account; no key.
 resource "google_artifact_registry_repository_iam_member" "ci_writer" {
   count = var.ci_service_account == null ? 0 : 1
 

@@ -1,9 +1,6 @@
 name: Validate
 
-# Credential-free by design: formatting, config validity, a static security scan
-# and the app builds all run without touching GCP. This is the workflow a fork or
-# a visitor can actually run — terraform.yml needs the federated identity and can
-# only ever succeed on the owner's repository.
+# Credential-free checks (fmt, validate, scan, app builds), so forks can run it too.
 on:
   push:
     branches: [main]
@@ -28,9 +25,7 @@ jobs:
       - name: Format check
         run: terraform fmt -check -recursive terraform/
 
-      # Every module is validated on its own as well as through the env: a module
-      # can be broken in a way the env never instantiates, and that only surfaces
-      # the day someone reuses it.
+      # Modules on their own as well, so a module broken outside this env is caught.
       - name: Validate modules
         run: |
           for dir in terraform/modules/*/; do
@@ -39,11 +34,7 @@ jobs:
             terraform -chdir="$dir" validate
           done
 
-      # -backend=false: validate needs providers, not remote state. A real init
-      # would demand the bucket, which is deliberately not in this repo.
-      # Bootstrap as well as the environments: it is applied rarely and by hand,
-      # which is exactly when a broken config is most expensive to find. The
-      # envs/*/ glob picks up new environments without editing this workflow.
+      # -backend=false: validate needs providers, not state. envs/*/ picks up new environments.
       - name: Validate bootstrap and environments
         run: |
           for dir in terraform/bootstrap terraform/envs/*/; do
@@ -58,10 +49,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # Report-only. This is a reference architecture with deliberate trade-offs
-      # (a zonal cluster, an open control-plane CIDR) that a generic ruleset
-      # flags as HIGH — failing the build on someone else's severity ranking
-      # would block the repo on decisions already documented in docs/.
+      # Report-only: deliberate trade-offs (zonal cluster, open control-plane CIDR) are flagged HIGH.
       - name: Trivy config scan
         uses: aquasecurity/trivy-action@v0.36.0
         with:
@@ -91,10 +79,8 @@ jobs:
         working-directory: ${{ matrix.service }}
         run: npm ci
 
-      # Neither package.json declares a test script yet, so this asserts the
-      # weaker but still real thing: the code parses. The api's entrypoint is
-      # app.js; web is a Vite app with no app.js, so `node --check app.js`
-      # failed every run there — its equivalent is the bundle building.
+      # No test scripts yet, so this checks the code parses: node --check for the
+      # api, a bundle build for web (a Vite app with no app.js).
       - name: Smoke check
         working-directory: ${{ matrix.service }}
         run: |
@@ -104,7 +90,6 @@ jobs:
             node --check app.js
           fi
 
-      # Build only, no registry login — proves the Dockerfile is sound without
-      # needing any GCP credential.
+      # Build only, no registry login.
       - name: Docker build
         run: docker build -t ${{ matrix.service }}:ci ${{ matrix.service }}/

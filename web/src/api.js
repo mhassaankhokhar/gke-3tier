@@ -1,10 +1,5 @@
-// Every call goes to a relative path.
-//
-// nginx proxies /api to the api Service inside the cluster, so the browser
-// never learns an API address and there is no CORS to configure. It also means
-// the same build runs in any environment — an API URL baked in at build time
-// would make the image environment-specific, which defeats promoting one
-// artifact through environments.
+// Relative paths: nginx proxies /api in-cluster, so no API URL in the bundle
+// and one build runs in every environment.
 const json = async (res) => {
   if (res.status === 204) return null;
   const body = await res.json().catch(() => ({}));
@@ -12,9 +7,7 @@ const json = async (res) => {
   return body;
 };
 
-// Returns { data, total, limit, offset }. The endpoint is paginated because an
-// unbounded list grew with the table — 363KB at 1,275 rows — so the caller has
-// to carry the offset rather than assume it received everything.
+// Paginated: returns { data, total, limit, offset }.
 export const listSubscriptions = ({ status, limit = 50, offset = 0 } = {}) => {
   const q = new URLSearchParams({ limit, offset });
   if (status) q.set('status', status);

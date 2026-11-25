@@ -1,22 +1,5 @@
-# User-managed service accounts for the cluster and the pipeline.
-#
-# Worth being explicit about what is and is not creatable here, because it is
-# the opposite of AWS:
-#
-#   Creatable (what this module makes) — user-managed service accounts. In GCP a
-#   service account is a first-class identity you own. AWS has no equivalent
-#   object; there, EC2/ECS attach *roles* via instance profiles and task roles.
-#
-#   NOT creatable — Google-owned accounts, the real counterpart of AWS's
-#   service-linked roles:
-#     * default accounts, e.g. PROJECT_NUMBER-compute@developer.gserviceaccount.com,
-#       created automatically when the Compute API is enabled
-#     * service agents, e.g. service-PROJECT_NUMBER@container-engine-robot.iam
-#       .gserviceaccount.com, created and managed by Google
-#   You can grant those roles; you cannot create, delete or re-scope them.
-#
-# The default compute account carries project-level Editor. That is why the node
-# pools take a scoped account from here instead of falling back to it.
+# User-managed service accounts for the nodes and the pipeline. The default
+# compute account has project Editor, so nodes use a scoped account from here.
 
 # ── Node service account ─────────────────────────────────────────────────────
 resource "google_service_account" "nodes" {
@@ -25,9 +8,8 @@ resource "google_service_account" "nodes" {
   description  = "Scoped replacement for the default compute service account, which holds project Editor"
 }
 
-# The minimum a GKE node needs to register, ship logs and export metrics. Image
-# pull permission is NOT here — that is granted on the Artifact Registry
-# repository itself, so it stays scoped to one repository rather than the project.
+# Minimum a GKE node needs. Image pull is granted on the Artifact Registry
+# repository instead, to keep it scoped to one repository.
 locals {
   node_roles = [
     "roles/logging.logWriter",
@@ -46,30 +28,21 @@ resource "google_project_iam_member" "nodes" {
 }
 
 # ── CI service account ───────────────────────────────────────────────────────
-# Impersonated by GitHub Actions through Workload Identity Federation. No key is
-# ever created for it — that is the point, and why keys are gitignored.
+# Impersonated by GitHub Actions through Workload Identity Federation; no key.
 resource "google_service_account" "ci" {
   account_id   = "${var.name}-ci"
   display_name = "${var.name} CI pipeline"
   description  = "Impersonated by GitHub Actions via Workload Identity Federation; has no keys"
 
-  # Second line of defence behind state separation: even a destroy run in the
-  # wrong directory is refused at plan time. This account is what lets CI
-  # authenticate at all — losing it means redoing the whole bootstrap.
+  # CI cannot authenticate without this account.
   lifecycle {
     prevent_destroy = true
   }
 }
 
-# What CI needs to apply the infrastructure — and deliberately no more.
-#
-# Withheld: iam.serviceAccountAdmin and resourcemanager.projectIamAdmin. Without
-# them the pipeline can build the whole stack but cannot create service accounts
-# or grant itself project roles, so a compromised workflow cannot widen its own
-# access. The cost is that IAM changes stay a bootstrap task.
-#
-# viewer is here because `plan` refreshes every resource in state, including the
-# accounts this module creates, and reading those needs project-wide read.
+# What CI needs to apply the stack. iam.serviceAccountAdmin and
+# resourcemanager.projectIamAdmin are withheld so CI cannot widen its own access.
+# viewer: plan refreshes the accounts in state.
 locals {
   ci_roles = [
     "roles/viewer",
@@ -88,10 +61,7 @@ resource "google_project_iam_member" "ci" {
   member  = "serviceAccount:${google_service_account.ci.email}"
 }
 
-# Terraform state lives in a bucket created out-of-band (the backend has to exist
-# before the configuration that uses it), so this grants access to it rather than
-# creating it. Without this, CI's very first `terraform init` fails on
-# storage.objects.list.
+# The state bucket exists before Terraform (backend), so access is granted, not the bucket created.
 data "google_storage_bucket" "state" {
   name = var.state_bucket
 }
@@ -103,45 +73,28 @@ resource "google_storage_bucket_iam_member" "ci_state" {
 }
 
 # ── Database backup service account ──────────────────────────────────────────
-# CloudNativePG writes base backups and WAL to GCS. The Kubernetes service
-# account is bound to this one through Workload Identity, so the operator
-# authenticates without a mounted key file.
+# CloudNativePG writes backups and WAL to GCS via Workload Identity.
 resource "google_service_account" "backup" {
   account_id   = "${var.name}-backup"
   display_name = "${var.name} database backups"
   description  = "Bound to the CloudNativePG Kubernetes service account via Workload Identity"
 }
 
-# CI manages the KSA→GSA bindings on these accounts, so it needs setIamPolicy on
-# each. Granted at the RESOURCE level, not project-wide: CI can change these two
-# accounts' policies and no others, and still cannot create or delete accounts or
-# grant itself project roles.
-#
-# One entry per account rather than a project-level grant — adding a third
-# workload identity should be a deliberate line here, not something CI silently
-# gains the ability to do.
+# Resource-level setIamPolicy so CI can manage the KSA→GSA bindings of these
+# accounts only. One entry per account: adding another is a deliberate change.
 
-# NOTE: the Kubernetes-service-account binding for this account is deliberately
-# NOT here. It references the cluster's Workload Identity pool
-# (PROJECT.svc.id.goog), which does not exist until a GKE cluster with
-# workload_identity_config has been created — and this module is applied during
-# bootstrap, before any cluster. The binding lives in the env alongside the gke
-# module so ordering falls out of the dependency graph instead of being a rule
-# someone has to remember.
+# The KSA→GSA binding lives in envs/dev: it needs the cluster's Workload
+# Identity pool, which doesn't exist at bootstrap.
 
 # ── External Secrets service account ─────────────────────────────────────────
-# External Secrets Operator pulls the Cloudflare API token out of Secret Manager
-# and projects it into the cluster as a Kubernetes Secret. Bound to its
-# Kubernetes service account through Workload Identity, so nothing downloads a
-# key and nothing puts the token in Git or in Terraform state.
+# Reads the Cloudflare token from Secret Manager via Workload Identity.
 resource "google_service_account" "external_secrets" {
   account_id   = "${var.name}-eso"
   display_name = "${var.name} External Secrets"
   description  = "Reads secrets from Secret Manager on behalf of External Secrets Operator"
 }
 
-# accessor, not admin: it can read secret *values* and nothing else — it cannot
-# create, update or delete a secret, or read the project's other resources.
+# accessor: reads secret values only.
 resource "google_secret_manager_secret_iam_member" "external_secrets" {
   for_each = toset(var.readable_secrets)
 
@@ -151,9 +104,7 @@ resource "google_secret_manager_secret_iam_member" "external_secrets" {
   member    = "serviceAccount:${google_service_account.external_secrets.email}"
 }
 
-# NOTE: like the backup account, the KSA→GSA binding for this one lives with the
-# cluster (envs/dev), not here — it references PROJECT.svc.id.goog, which only
-# exists once a cluster does.
+# KSA→GSA binding is in envs/dev, as for the backup account.
 
 resource "google_service_account_iam_member" "ci_manages_bindings" {
   for_each = {

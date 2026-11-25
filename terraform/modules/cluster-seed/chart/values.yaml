@@ -1,5 +1,4 @@
-# Every value is supplied by the Terraform module; these exist so `helm lint` and
-# `helm template` work standalone, and so the expected keys are discoverable.
+# Supplied by the Terraform module; defaults let helm lint/template run standalone.
 projectId: ""
 clusterName: ""
 clusterLocation: ""

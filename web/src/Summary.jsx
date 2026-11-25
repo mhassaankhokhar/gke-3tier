@@ -1,4 +1,4 @@
-// The reason the app exists: not the list, but what it costs and what could go.
+// Monthly cost, upcoming renewals and what could be cancelled.
 export default function Summary({ data, money }) {
   if (!data) return null;
   const { monthly_total, yearly_total, active_count, unused, upcoming_renewals,

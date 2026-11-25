@@ -1,26 +1,6 @@
-# Private GKE cluster with two node pools.
-#
-# The split exists because spot nodes and stateful workloads do not mix. Spot
-# VMs are reclaimed on ~30 seconds notice; a CloudNativePG primary or a Longhorn
-# replica living on one means constant failover and volume rebuilds. So:
-#
-#   stateful pool — on-demand, runs Postgres and Longhorn
-#   spot pool     — preemptible, runs web/api
-#
-# Stateless replicas absorb preemption fine, and they are the bulk of the
-# compute, so most of the cost saving survives the split.
-#
-# Placement is by LABEL, not by taint. The stateful pool was tainted
-# NoSchedule at first, and that pushed every GKE system pod — kube-dns,
-# metrics-server, konnectivity — onto the spot nodes, because none of them
-# tolerate a custom taint. Two consequences, both bad: cluster DNS ended up on
-# preemptible hardware, and the spot pool needed a second node purely for system
-# overhead before any application was deployed.
-#
-# So neither pool is tainted. Workloads that must land somewhere specific say so
-# themselves via nodeSelector on the workload label — which also puts the
-# scheduling decision in the manifest, where it is visible, instead of in a node
-# pool property nobody reads.
+# Private zonal GKE cluster with two node pools: on-demand "stateful" for Postgres
+# and Longhorn, spot "stateless" for web/api. Pools are selected by the
+# workload label, not taints: a taint pushes GKE system pods (kube-dns etc.) onto spot.
 
 resource "google_container_cluster" "main" {
   name     = var.name
@@ -29,13 +9,12 @@ resource "google_container_cluster" "main" {
   network    = var.network_id
   subnetwork = var.subnet_id
 
-  # GKE insists on a default pool at create time; both real pools are managed as
-  # separate resources so their settings can change without cluster replacement.
+  # GKE requires a default pool at create time; the real pools are separate
+  # resources so they can change without replacing the cluster.
   remove_default_node_pool = true
   initial_node_count       = 1
 
-  # Lets pods authenticate as GCP service accounts without a downloaded key —
-  # the same "no stored credentials" posture the CI pipeline uses.
+  # Pods authenticate as GCP service accounts without key files.
   workload_identity_config {
     workload_pool = "${var.project_id}.svc.id.goog"
   }
@@ -45,26 +24,14 @@ resource "google_container_cluster" "main" {
     services_secondary_range_name = var.services_range_name
   }
 
-  # Dataplane V2 (eBPF/Cilium) instead of kube-proxy and iptables, chiefly
-  # because it enforces NetworkPolicy natively. Before this, the cluster had no
-  # policy controller, so the API server accepted
-  # gke-3tier-gitops/manifests/postgres/networkpolicy.yaml and nothing enforced
-  # it: any pod could reach Postgres. No separate network_policy block is set,
-  # because that block configures Calico and GKE rejects it alongside
-  # ADVANCED_DATAPATH.
-  #
-  # This is a literal, not a variable. GKE cannot change the datapath on a
-  # running cluster, so changing this value destroys and recreates the cluster,
-  # and on an empty state that needs the targeted first apply described in
-  # docs/bootstrap.md.
+  # Dataplane V2: enforces NetworkPolicy natively (no Calico). Literal, not a
+  # variable: changing it replaces the cluster (see docs/bootstrap.md, first apply).
   datapath_provider = "ADVANCED_DATAPATH"
 
   private_cluster_config {
     enable_private_nodes = true
-    # The control plane keeps a public endpoint: a private endpoint would need a
-    # bastion or VPN to reach kubectl from a laptop, which is real production
-    # practice but pure friction for a single-operator project. Access is
-    # restricted by master_authorized_networks below instead.
+    # Public endpoint, restricted by master_authorized_networks: a private one
+    # would need a bastion or VPN for kubectl.
     enable_private_endpoint = false
     master_ipv4_cidr_block  = var.master_cidr
   }
@@ -83,8 +50,7 @@ resource "google_container_cluster" "main" {
     channel = var.release_channel
   }
 
-  # Off on purpose: this cluster runs its own kube-prometheus-stack, and GKE's
-  # managed collection bills per sample on top of it.
+  # Off: the cluster runs its own kube-prometheus-stack; managed collection bills per sample.
   monitoring_config {
     enable_components = []
     managed_prometheus {
@@ -96,8 +62,7 @@ resource "google_container_cluster" "main" {
     enable_components = ["SYSTEM_COMPONENTS"]
   }
 
-  # A trial-credit cluster should be destroyable. The default protection turns
-  # `terraform destroy` into a manual console step.
+  # Destroyable without a console step.
   deletion_protection = false
 }
 
@@ -114,40 +79,17 @@ resource "google_container_node_pool" "stateful" {
     disk_size_gb = var.stateful_disk_size
     disk_type    = "pd-balanced"
 
-    # Container-Optimized OS on both pools.
-    #
-    # Longhorn needs iscsiadm and the iscsi_tcp module on the host. Neither GKE
-    # image provides them: Longhorn's docs recommend Ubuntu on GKE "since it
-    # contains open-iscsi already", but on a GKE Ubuntu 24.04 node it does not —
-    # `kubectl debug node/... -- chroot /host which iscsiadm` finds nothing. The
-    # documentation is stale, so switching images buys nothing and gives up COS's
-    # smaller, better-hardened surface.
-    #
-    # The requirement is met instead by Longhorn's GKE COS node agent, deployed
-    # from the GitOps repo, which loads the kernel module and runs iscsid in a
-    # container.
+    # COS on both pools. Longhorn's iscsi requirement is met by its GKE COS node
+    # agent (GitOps repo); GKE's Ubuntu image lacks iscsiadm too.
     image_type = var.stateful_image_type
 
-    # Longhorn replicates volumes across nodes itself, so the pool must not be
-    # autoscaled down underneath it — node_count is fixed for that reason.
+    # Fixed node_count: Longhorn replicates across these nodes and must not be scaled down under.
     labels = {
       workload = "stateful"
 
-      # Which nodes Longhorn may put replica data on.
-      #
-      # longhorn-manager runs on every node, because Longhorn refuses to attach
-      # a volume to a node it has not registered — including an RWX volume,
-      # whose client only mounts NFS. Pinning the manager to this pool made the
-      # spot pool unable to mount anything at all:
-      #
-      #   FailedAttachVolume: node.longhorn.io "gke-...-spot-..." not found
-      #
-      # So placement moves down a level: manager everywhere, disks only here.
-      # With create-default-disk-labeled-nodes enabled, Longhorn creates a
-      # default disk only on nodes carrying this label, and a node with no disk
-      # can mount volumes but can never host a replica. That is the property
-      # the manager's nodeSelector was standing in for, expressed where it
-      # actually belongs.
+      # Longhorn creates replica disks only on nodes with this label
+      # (create-default-disk-labeled-nodes); longhorn-manager still runs everywhere
+      # so spot nodes can mount volumes.
       "node.longhorn.io/create-default-disk" = "true"
     }
 
@@ -170,27 +112,9 @@ resource "google_container_node_pool" "stateful" {
   }
 }
 
-# ── Probe pool: one spot e2-standard-2, to measure rather than assume ────────
-#
-# Exists to answer one question with a number instead of a claim: how much of a
-# non-shared-core node is actually schedulable, on spot.
-#
-# The reason to ask is that e2-medium is shared-core — Compute Engine's own API
-# reports isSharedCpu: true for it and false for e2-standard-2 — and GKE
-# reserves a flat 1060m on shared-core instead of the usual 6%+1%. So an
-# e2-medium reports cpu=2 and offers 940m, while an e2-standard-2 reports the
-# same cpu=2 and offers 1930m. That much is already visible in this cluster.
-# What is not yet visible is whether spot changes it, because the only
-# e2-standard-2 nodes here are on-demand.
-#
-# It carries workload=stateless-probe, NOT stateless. Nothing moves onto it:
-# every application pod selects workload=stateless, and this is a different
-# value. DaemonSets have no selector, so they do land — which is the other half
-# of the measurement, since the per-node agent floor is what makes a small node
-# expensive.
-#
-# Delete by setting probe_pool_enabled = false. It is a measurement, not
-# infrastructure, and it should not outlive the answer.
+# ── Probe pool: off by default (probe_pool_enabled) ──────────────────────────
+# Measured allocatable CPU on spot e2-standard-2. Labelled stateless-probe so no
+# app pod selects it. Remove once no longer needed.
 resource "google_container_node_pool" "probe" {
   count = var.probe_pool_enabled ? 1 : 0
 

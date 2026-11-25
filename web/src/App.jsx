@@ -15,9 +15,7 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(null);
 
-  // Both are refetched together after every write. The summary is aggregated
-  // server-side and cached, so re-deriving it in the browser would drift from
-  // what the API reports the moment the two disagree.
+  // Refetched together after every write; the summary comes from the API, not derived here.
   const PAGE = 50;
 
   const load = useCallback(async () => {
@@ -51,9 +49,7 @@ export default function App() {
     await load();
   };
 
-  // Cancelling rather than deleting, because the two mean different things:
-  // a cancelled subscription is history worth keeping, and deleting it loses
-  // the record of what was once being paid for.
+  // Cancel, not delete: a cancelled subscription is history worth keeping.
   const cancel = async (sub) => {
     await api.updateSubscription(sub.id, { status: 'cancelled' });
     await load();

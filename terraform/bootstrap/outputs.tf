@@ -1,6 +1,5 @@
-# Set these two as GitHub repository *variables*. Neither is a credential: the
-# provider name identifies a trust relationship and is unusable without an OIDC
-# token from the one repository the binding permits.
+# Set as GitHub repository variables. Not credentials: unusable without an
+# OIDC token from the permitted repository.
 output "gcp_workload_identity_provider" {
   description = "GitHub Actions variable: GCP_WORKLOAD_IDENTITY_PROVIDER"
   value       = module.workload_identity.provider_name
@@ -11,8 +10,7 @@ output "gcp_service_account" {
   value       = module.iam.ci_service_account_email
 }
 
-# Consumed by infra/ through terraform_remote_state — infra never creates these,
-# it only reads them.
+# Read by envs/dev through terraform_remote_state.
 output "node_service_account_email" {
   value = module.iam.node_service_account_email
 }

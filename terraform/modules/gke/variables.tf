@@ -135,11 +135,8 @@ variable "spot_min_nodes" {
   default = 1
 }
 
-# E2_CPUS in this region is 8, and every machine here is E2 at 2 vCPU each. The
-# stable pool takes 4, so this pool can reach 2 nodes before the quota binds —
-# max 3 is a ceiling the quota will not honour. Left as is deliberately: the
-# autoscaler simply stops at what it can get, and raising the quota is a request
-# to Google rather than a change to this file.
+# E2_CPUS quota is 8 and the stateful pool uses 4, so this pool reaches 2
+# nodes in practice; the autoscaler stops there.
 variable "spot_max_nodes" {
   description = "Ceiling for HPA-driven scale-out. Low on purpose — a runaway HPA on a trial credit is a real way to lose it."
   type        = number
