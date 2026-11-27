@@ -20,6 +20,17 @@ on:
         type: choice
         options: ["", "module.gke"]
         default: ""
+      # Destroys instead of applying. With target=module.gke, only the cluster
+      # and what depends on it go; network, registry and bootstrap stay.
+      destroy:
+        description: "Destroy (with target=module.gke: the cluster only)"
+        type: boolean
+        default: false
+      # Runs the plan and stops, so a destroy can be reviewed before it runs.
+      plan_only:
+        description: "Plan only, skip apply"
+        type: boolean
+        default: false
 
 # All runs share one state lock, so they queue instead of failing with 412.
 # No cancel-in-progress: cancelling an apply can leave state half-written.
@@ -67,10 +78,11 @@ jobs:
       - name: Plan
         id: plan
         working-directory: terraform/envs/dev
-        # Empty except on dispatch; the saved plan carries -target into apply.
+        # Empty except on dispatch; the saved plan carries -target and -destroy into apply.
         env:
           TARGET: ${{ github.event.inputs.target }}
-        run: terraform plan ${TARGET:+-target="$TARGET"} -out=tfplan -input=false -no-color
+          DESTROY: ${{ github.event.inputs.destroy == 'true' && 'true' || '' }}
+        run: terraform plan ${DESTROY:+-destroy} ${TARGET:+-target="$TARGET"} -out=tfplan -input=false -no-color
 
       # Apply uses exactly the reviewed plan. Short retention: it holds resource detail.
       - uses: actions/upload-artifact@v7
@@ -92,7 +104,7 @@ jobs:
   apply:
     name: Apply
     # PRs only plan.
-    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.plan_only != 'true')
     needs: plan
     runs-on: ubuntu-latest
     # Add required reviewers to this environment to gate the apply.
